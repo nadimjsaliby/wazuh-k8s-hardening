@@ -10,7 +10,7 @@
         "clusterName": { "type": "string", "minLength": 1 },
         "environment": { "type": "string", "enum": ["production", "staging", "development"] },
         "organization": { "type": "string" },
-        "complianceContact": { "type": "string", "format": "email" }
+        "complianceContact": { "type": "string" }
       },
       "required": ["clusterName", "environment"]
     },
