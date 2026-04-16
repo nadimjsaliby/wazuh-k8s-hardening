@@ -1,0 +1,115 @@
+name: Helm Chart CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Lint Chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+      - name: Helm lint
+        run: helm lint .
+
+  template:
+    name: Template Validation
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        profile:
+          - name: minimal
+            values: |
+              manager:
+                host: "wazuh-manager.test"
+                registrationPassword: "test123"
+          - name: full-compliance
+            values: |
+              manager:
+                host: "wazuh-manager.test"
+                registrationPassword: "test123"
+              compliance:
+                cisKubernetes:
+                  profile: "L2"
+                cisLinux:
+                  profile: "L2"
+                pciDss:
+                  enabled: true
+                hipaa:
+                  enabled: true
+                soc2:
+                  enabled: true
+              admissionWebhook:
+                enabled: true
+              autoRemediation:
+                enabled: true
+                dryRun: true
+              complianceReport:
+                enabled: true
+              metrics:
+                serviceMonitor:
+                  enabled: true
+                prometheusRule:
+                  enabled: true
+              grafana:
+                enabled: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+      - name: Create values file
+        run: |
+          echo '${{ matrix.profile.values }}' > /tmp/test-values.yaml
+      - name: Helm template (${{ matrix.profile.name }})
+        run: |
+          helm template test-release . \
+            --namespace wazuh-system \
+            -f /tmp/test-values.yaml \
+            --debug
+
+  schema-validation:
+    name: Values Schema Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install jsonschema pyyaml
+      - name: Validate values against schema
+        run: |
+          python3 -c "
+          import yaml, json, jsonschema
+          with open('values.yaml') as f:
+              values = yaml.safe_load(f)
+          with open('values.schema.json') as f:
+              schema = json.load(f)
+          jsonschema.validate(values, schema)
+          print('Schema validation passed')
+          "
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+      - name: Install kubesec
+        run: |
+          curl -sL https://github.com/controlplaneio/kubesec/releases/latest/download/kubesec_linux_amd64.tar.gz | tar xz
+          sudo mv kubesec /usr/local/bin/
+      - name: Template and scan
+        run: |
+          helm template test . \
+            --set manager.host=test \
+            --set manager.registrationPassword=test | \
+          kubesec scan - || true
