@@ -1,0 +1,36 @@
+{{- if .Values.admissionWebhook.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "wazuh-k8s-hardening.webhookServiceName" . }}-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.webhookLabels" . | nindent 4 }}
+data:
+  policy.json: |
+    {
+      "clusterName": {{ .Values.global.clusterName | quote }},
+      "environment": {{ .Values.global.environment | quote }},
+      "policies": {
+        "blockPrivileged": {{ .Values.admissionWebhook.policies.blockPrivileged }},
+        "blockHostNetwork": {{ .Values.admissionWebhook.policies.blockHostNetwork }},
+        "blockHostPID": {{ .Values.admissionWebhook.policies.blockHostPID }},
+        "blockHostIPC": {{ .Values.admissionWebhook.policies.blockHostIPC }},
+        "requireRunAsNonRoot": {{ .Values.admissionWebhook.policies.requireRunAsNonRoot }},
+        "requireReadOnlyRootFilesystem": {{ .Values.admissionWebhook.policies.requireReadOnlyRootFilesystem }},
+        "blockPrivilegeEscalation": {{ .Values.admissionWebhook.policies.blockPrivilegeEscalation }},
+        "maxCPULimit": {{ .Values.admissionWebhook.policies.maxCPULimit | quote }},
+        "maxMemoryLimit": {{ .Values.admissionWebhook.policies.maxMemoryLimit | quote }},
+        "requiredLabels": {{ .Values.admissionWebhook.policies.requiredLabels | toJson }},
+        "blockedImageRegistries": {{ .Values.admissionWebhook.policies.blockedImageRegistries | toJson }},
+        "allowedImageRegistries": {{ .Values.admissionWebhook.policies.allowedImageRegistries | toJson }},
+        "requireImageDigest": {{ .Values.admissionWebhook.policies.requireImageDigest }},
+        "blockLatestTag": {{ .Values.admissionWebhook.policies.blockLatestTag }}
+      },
+      "exemptNamespaces": ["kube-system", "kube-public", "kube-node-lease", {{ .Release.Namespace | quote }}],
+      "exemptServiceAccounts": [
+        "system:serviceaccount:kube-system:*",
+        "system:serviceaccount:{{ .Release.Namespace }}:{{ include "wazuh-k8s-hardening.serviceAccountName" . }}"
+      ]
+    }
+{{- end }}

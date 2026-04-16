@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}-test-policies
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "2"
+spec:
+  restartPolicy: Never
+  containers:
+    - name: policy-validation
+      image: {{ include "wazuh-k8s-hardening.image" . }}
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "=== Wazuh K8s Hardening — SCA Policy Validation ==="
+          ERRORS=0
+
+          validate_yaml() {
+            FILE=$1
+            LABEL=$2
+            if [ ! -f "${FILE}" ]; then
+              echo "SKIP: ${LABEL} — file not mounted"
+              return
+            fi
+            # Check YAML is parseable and has required fields
+            if grep -q "^policy:" "${FILE}" && grep -q "^checks:" "${FILE}"; then
+              CHECK_COUNT=$(grep -c "^  - id:" "${FILE}" || echo 0)
+              echo "PASS: ${LABEL} — ${CHECK_COUNT} checks found"
+            else
+              echo "FAIL: ${LABEL} — missing policy/checks sections"
+              ERRORS=$((ERRORS + 1))
+            fi
+          }
+
+          {{- if .Values.compliance.cisKubernetes.enabled }}
+          validate_yaml "/var/ossec/etc/shared/cis-kubernetes/cis_kubernetes_{{ lower .Values.compliance.cisKubernetes.profile }}.yml" "CIS Kubernetes {{ .Values.compliance.cisKubernetes.profile }}"
+          {{- end }}
+          {{- if .Values.compliance.cisLinux.enabled }}
+          validate_yaml "/var/ossec/etc/shared/cis-linux/cis_linux_{{ lower .Values.compliance.cisLinux.profile }}.yml" "CIS Linux {{ .Values.compliance.cisLinux.profile }}"
+          {{- end }}
+          {{- if .Values.compliance.nist80053.enabled }}
+          validate_yaml "/var/ossec/etc/shared/nist-800-53/nist_800_53_k8s.yml" "NIST 800-53"
+          {{- end }}
+          {{- if .Values.compliance.pciDss.enabled }}
+          validate_yaml "/var/ossec/etc/shared/pci-dss/pci_dss_k8s.yml" "PCI-DSS v4.0"
+          {{- end }}
+          {{- if .Values.compliance.hipaa.enabled }}
+          validate_yaml "/var/ossec/etc/shared/hipaa/hipaa_k8s.yml" "HIPAA"
+          {{- end }}
+          {{- if .Values.compliance.soc2.enabled }}
+          validate_yaml "/var/ossec/etc/shared/soc2/soc2_k8s.yml" "SOC2 Type II"
+          {{- end }}
+          {{- if .Values.compliance.runtimeThreatDetection.enabled }}
+          validate_yaml "/var/ossec/etc/shared/runtime/runtime_threat_detection.yml" "Runtime Threat Detection"
+          {{- end }}
+
+          echo ""
+          if [ ${ERRORS} -gt 0 ]; then
+            echo "FAILED: ${ERRORS} policy file(s) invalid"
+            exit 1
+          fi
+          echo "All policy files validated successfully"
+      volumeMounts:
+        - name: cis-policies
+          mountPath: /var/ossec/etc/shared
+          readOnly: true
+  volumes:
+    - name: cis-policies
+      configMap:
+        name: {{ include "wazuh-k8s-hardening.fullname" . }}-cis-policies

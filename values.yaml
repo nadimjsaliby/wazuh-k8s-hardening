@@ -1,0 +1,493 @@
+##############################################################################
+# Wazuh K8s Hardening — Enterprise Values
+##############################################################################
+
+global:
+  # -- Cluster name identifier used in dashboards and reports
+  clusterName: "production"
+  # -- Environment label (production, staging, development)
+  environment: "production"
+  # -- Organization name for compliance reports
+  organization: ""
+  # -- Contact email for compliance reports
+  complianceContact: ""
+
+# ==========================================================================
+# Image Configuration
+# ==========================================================================
+image:
+  repository: wazuh/wazuh-agent
+  pullPolicy: IfNotPresent
+  # -- Overrides appVersion
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ==========================================================================
+# Wazuh Manager Connection
+# ==========================================================================
+manager:
+  # -- Primary Wazuh manager endpoint
+  host: "wazuh-manager.wazuh.svc.cluster.local"
+  port: 1514
+  registrationPort: 1515
+  protocol: "tcp"
+  agentGroups: "kubernetes"
+  # -- Use existing secret for registration password (recommended for production)
+  existingSecret: ""
+  existingSecretKey: "registration-password"
+  # -- Inline registration password (use existingSecret instead in production)
+  registrationPassword: ""
+  # -- Failover manager endpoints for HA
+  failover:
+    enabled: false
+    hosts: []
+    #  - host: "wazuh-manager-2.wazuh.svc.cluster.local"
+    #    port: 1514
+    #    protocol: "tcp"
+
+  # -- mTLS configuration via cert-manager
+  tls:
+    enabled: false
+    # -- cert-manager issuer reference
+    issuerRef:
+      name: ""
+      kind: "ClusterIssuer"
+    # -- Duration of the certificate
+    duration: "8760h"
+    # -- Renew before expiry
+    renewBefore: "720h"
+
+# ==========================================================================
+# Agent Configuration
+# ==========================================================================
+agent:
+  namePrefix: "k8s"
+  # -- Labels to apply as agent metadata
+  labels: {}
+
+# ==========================================================================
+# Compliance Framework Configuration
+# ==========================================================================
+compliance:
+  # -- CIS Kubernetes Benchmark v1.8.0
+  cisKubernetes:
+    enabled: true
+    # -- Profile: L1 (essential), L2 (defense-in-depth)
+    profile: "L1"
+    interval: "43200"
+    skipChecks: ""
+
+  # -- CIS Distribution Independent Linux Benchmark v2.0.0
+  cisLinux:
+    enabled: true
+    profile: "L1"
+    interval: "43200"
+    skipChecks: ""
+
+  # -- NIST 800-53 Rev5 controls mapped to Kubernetes
+  nist80053:
+    enabled: true
+    interval: "43200"
+
+  # -- PCI-DSS v4.0 controls for containerized environments
+  pciDss:
+    enabled: false
+    interval: "43200"
+
+  # -- HIPAA Security Rule technical safeguards
+  hipaa:
+    enabled: false
+    interval: "43200"
+
+  # -- SOC2 Type II Trust Services Criteria
+  soc2:
+    enabled: false
+    interval: "43200"
+
+  # -- Runtime threat detection (eBPF-based behavioral analysis)
+  runtimeThreatDetection:
+    enabled: true
+    interval: "300"
+
+# ==========================================================================
+# Security Configuration Assessment (SCA)
+# ==========================================================================
+sca:
+  enabled: true
+  scanOnStart: true
+  interval: "43200"
+  skipNfs: true
+
+# ==========================================================================
+# Vulnerability Detection
+# ==========================================================================
+vulnerabilityDetector:
+  enabled: true
+  interval: "21600"
+  providers:
+    canonical:
+      enabled: true
+    redhat:
+      enabled: true
+    nvd:
+      enabled: true
+    msu:
+      enabled: true
+
+# ==========================================================================
+# File Integrity Monitoring (Syscheck)
+# ==========================================================================
+fim:
+  enabled: true
+  frequency: 43200
+  scanOnStart: true
+  # -- Who-data: real-time + user audit trail (requires auditd)
+  whoData: true
+  directories:
+    - path: "/etc"
+      realtime: true
+      checkAll: true
+      reportChanges: true
+    - path: "/usr/bin"
+      realtime: true
+      checkAll: true
+    - path: "/usr/sbin"
+      realtime: true
+      checkAll: true
+    - path: "/bin"
+      realtime: true
+      checkAll: true
+    - path: "/sbin"
+      realtime: true
+      checkAll: true
+    - path: "/boot"
+      realtime: true
+      checkAll: true
+    - path: "/var/lib/kubelet"
+      realtime: true
+      checkAll: true
+      reportChanges: true
+    - path: "/etc/kubernetes"
+      realtime: true
+      checkAll: true
+      reportChanges: true
+  ignorePaths:
+    - "/etc/mtab"
+    - "/etc/hosts.deny"
+    - "/etc/mail/statistics"
+    - "/etc/svc/volatile"
+    - "/etc/adjtime"
+    - "/etc/resolv.conf"
+
+# ==========================================================================
+# Log Collection
+# ==========================================================================
+logCollector:
+  enabled: true
+  files:
+    - location: "/var/log/syslog"
+      logFormat: "syslog"
+    - location: "/var/log/auth.log"
+      logFormat: "syslog"
+    - location: "/var/log/kern.log"
+      logFormat: "syslog"
+    - location: "/var/log/dpkg.log"
+      logFormat: "syslog"
+    - location: "/var/log/secure"
+      logFormat: "syslog"
+    - location: "/var/log/messages"
+      logFormat: "syslog"
+  # -- Collect container runtime logs
+  containerRuntime:
+    enabled: true
+    logPath: "/var/log/containers/*.log"
+    logFormat: "json"
+
+# ==========================================================================
+# Kubernetes Audit Log Monitoring
+# ==========================================================================
+kubernetesAudit:
+  enabled: false
+  auditLogPath: "/var/log/kubernetes/audit/audit.log"
+
+# ==========================================================================
+# Admission Webhook (Pre-deployment Policy Enforcement)
+# ==========================================================================
+admissionWebhook:
+  # -- Deploy a ValidatingWebhookConfiguration that blocks non-compliant workloads
+  enabled: false
+  image:
+    repository: wazuh/wazuh-k8s-admission
+    tag: "1.0.0"
+    pullPolicy: IfNotPresent
+  replicas: 2
+  # -- Fail open: if webhook is unavailable, allow the request
+  failurePolicy: "Ignore"
+  # -- Namespaces to enforce (empty = all non-system namespaces)
+  namespaceSelector:
+    matchExpressions:
+      - key: "kubernetes.io/metadata.name"
+        operator: NotIn
+        values: ["kube-system", "kube-public", "kube-node-lease"]
+  # -- Policies to enforce at admission time
+  policies:
+    blockPrivileged: true
+    blockHostNetwork: true
+    blockHostPID: true
+    blockHostIPC: true
+    requireRunAsNonRoot: true
+    requireReadOnlyRootFilesystem: false
+    blockPrivilegeEscalation: true
+    maxCPULimit: "4"
+    maxMemoryLimit: "8Gi"
+    requiredLabels:
+      - "app.kubernetes.io/name"
+      - "app.kubernetes.io/version"
+    blockedImageRegistries: []
+    # - "docker.io"
+    allowedImageRegistries: []
+    # - "registry.company.com"
+    requireImageDigest: false
+    blockLatestTag: true
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+  # -- cert-manager integration for webhook TLS
+  certManager:
+    enabled: true
+    issuerRef:
+      name: ""
+      kind: "ClusterIssuer"
+
+# ==========================================================================
+# Auto-Remediation Engine
+# ==========================================================================
+autoRemediation:
+  # -- Enable CronJob that remediates discovered findings
+  enabled: false
+  # -- Schedule (default: every 6 hours)
+  schedule: "0 */6 * * *"
+  # -- Dry-run mode: log what would be fixed without making changes
+  dryRun: true
+  # -- Remediation categories to enable
+  policies:
+    filePermissions: true
+    kernelParameters: true
+    sshHardening: true
+    disableUnusedFilesystems: true
+    auditdConfiguration: true
+  # -- Slack notification on remediation actions
+  notifications:
+    enabled: false
+    slackWebhookUrl: ""
+    slackChannel: "#security-alerts"
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+# ==========================================================================
+# Compliance Report Generator
+# ==========================================================================
+complianceReport:
+  # -- Enable scheduled compliance report generation
+  enabled: false
+  # -- Cron schedule (default: weekly on Sunday at 02:00)
+  schedule: "0 2 * * 0"
+  # -- Output formats
+  formats:
+    json: true
+    html: true
+    csv: true
+  # -- Upload report to S3-compatible storage
+  s3Upload:
+    enabled: false
+    bucket: ""
+    region: ""
+    prefix: "compliance-reports/"
+    existingSecret: ""
+  # -- Email report delivery
+  email:
+    enabled: false
+    smtpHost: ""
+    smtpPort: 587
+    from: ""
+    to: []
+    existingSecret: ""
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# ==========================================================================
+# Observability
+# ==========================================================================
+metrics:
+  # -- Expose Prometheus metrics endpoint
+  enabled: true
+  port: 9090
+  path: "/metrics"
+  serviceMonitor:
+    # -- Create a ServiceMonitor for Prometheus Operator
+    enabled: false
+    interval: "30s"
+    scrapeTimeout: "10s"
+    additionalLabels: {}
+    namespace: ""
+  prometheusRule:
+    # -- Create PrometheusRule for alerting
+    enabled: false
+    additionalLabels: {}
+    rules: []
+
+grafana:
+  # -- Install Grafana dashboards as ConfigMaps
+  enabled: false
+  # -- Sidecar label for Grafana dashboard discovery
+  sidecarLabel: "grafana_dashboard"
+  sidecarLabelValue: "1"
+  # -- Folder in Grafana to place dashboards
+  folder: "Security"
+
+# ==========================================================================
+# Alert Routing
+# ==========================================================================
+alertRouting:
+  # -- Active response configuration
+  activeResponse:
+    enabled: true
+    # -- Block attacking IPs via firewall
+    firewallDrop:
+      enabled: true
+      timeout: 600
+      # -- Trigger on brute force attempts (rule group)
+      ruleIds: [5710, 5711, 5712, 5720, 5763]
+  # -- External integrations
+  integrations:
+    slack:
+      enabled: false
+      webhookUrl: ""
+      channel: "#security-alerts"
+      # -- Minimum alert level to send (1-16)
+      minLevel: 10
+    pagerduty:
+      enabled: false
+      apiKey: ""
+      # -- Minimum alert level to page
+      minLevel: 12
+    email:
+      enabled: false
+      smtpServer: ""
+      from: ""
+      to: []
+      minLevel: 10
+
+# ==========================================================================
+# Service Account & RBAC
+# ==========================================================================
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+rbac:
+  create: true
+
+# ==========================================================================
+# Pod Security
+# ==========================================================================
+podSecurityContext:
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  privileged: true
+  runAsUser: 0
+  capabilities:
+    add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+      - AUDIT_CONTROL
+      - AUDIT_READ
+      - DAC_READ_SEARCH
+      - NET_ADMIN
+
+# ==========================================================================
+# Network Policy
+# ==========================================================================
+networkPolicy:
+  # -- Create NetworkPolicy restricting agent traffic
+  enabled: true
+  # -- Additional egress rules (e.g., for external log destinations)
+  additionalEgressRules: []
+
+# ==========================================================================
+# Pod Disruption Budget
+# ==========================================================================
+podDisruptionBudget:
+  enabled: true
+  # -- Minimum available agents during voluntary disruptions
+  minAvailable: "50%"
+
+# ==========================================================================
+# Resources
+# ==========================================================================
+resources:
+  limits:
+    cpu: "1"
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 512Mi
+
+# ==========================================================================
+# Scheduling
+# ==========================================================================
+nodeSelector: {}
+
+tolerations:
+  - operator: "Exists"
+
+affinity: {}
+
+# -- Priority class for agent pods (create system-node-critical for production)
+priorityClassName: "system-node-critical"
+
+# ==========================================================================
+# Update Strategy
+# ==========================================================================
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxUnavailable: 1
+
+# ==========================================================================
+# Extension Points
+# ==========================================================================
+extraEnvVars: []
+extraVolumeMounts: []
+extraVolumes: []
+podAnnotations: {}
+podLabels: {}
+
+# -- Init containers for pre-flight validation
+initContainers: []
+# - name: wait-for-manager
+#   image: busybox:1.36
+#   command: ['sh', '-c', 'until nc -z wazuh-manager.wazuh.svc.cluster.local 1515; do sleep 2; done']
+
+# -- Sidecar containers (e.g., log forwarder, metrics exporter)
+sidecarContainers: []

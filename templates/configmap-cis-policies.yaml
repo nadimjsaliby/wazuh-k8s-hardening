@@ -1,0 +1,40 @@
+{{- if include "wazuh-k8s-hardening.anyComplianceEnabled" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}-cis-policies
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+data:
+  {{- if .Values.compliance.cisKubernetes.enabled }}
+  {{- $file := printf "cis_kubernetes_%s.yml" (lower .Values.compliance.cisKubernetes.profile) }}
+  {{ $file }}: |
+    {{- .Files.Get (printf "policies/cis-kubernetes/%s" $file) | nindent 4 }}
+  {{- end }}
+  {{- if .Values.compliance.cisLinux.enabled }}
+  {{- $file := printf "cis_linux_%s.yml" (lower .Values.compliance.cisLinux.profile) }}
+  {{ $file }}: |
+    {{- .Files.Get (printf "policies/cis-linux/%s" $file) | nindent 4 }}
+  {{- end }}
+  {{- if .Values.compliance.nist80053.enabled }}
+  nist_800_53_k8s.yml: |
+    {{- .Files.Get "policies/nist-800-53/nist_800_53_k8s.yml" | nindent 4 }}
+  {{- end }}
+  {{- if .Values.compliance.pciDss.enabled }}
+  pci_dss_k8s.yml: |
+    {{- .Files.Get "policies/pci-dss/pci_dss_k8s.yml" | nindent 4 }}
+  {{- end }}
+  {{- if .Values.compliance.hipaa.enabled }}
+  hipaa_k8s.yml: |
+    {{- .Files.Get "policies/hipaa/hipaa_k8s.yml" | nindent 4 }}
+  {{- end }}
+  {{- if .Values.compliance.soc2.enabled }}
+  soc2_k8s.yml: |
+    {{- .Files.Get "policies/soc2/soc2_k8s.yml" | nindent 4 }}
+  {{- end }}
+  {{- if .Values.compliance.runtimeThreatDetection.enabled }}
+  runtime_threat_detection.yml: |
+    {{- .Files.Get "policies/runtime/runtime_threat_detection.yml" | nindent 4 }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,20 @@
+{{- if .Values.metrics.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "wazuh-k8s-hardening.metricsServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+      name: metrics
+  selector:
+    {{- include "wazuh-k8s-hardening.selectorLabels" . | nindent 4 }}
+{{- end }}

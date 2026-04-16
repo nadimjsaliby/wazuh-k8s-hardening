@@ -1,0 +1,216 @@
+policy:
+  id: "soc2_k8s"
+  file: "soc2_k8s.yml"
+  name: "SOC2 Type II — Kubernetes Trust Services Criteria"
+  description: >-
+    Maps SOC2 Type II Trust Services Criteria to Kubernetes and host-level checks.
+    Covers Security (CC), Availability (A), Processing Integrity (PI),
+    Confidentiality (C), and Privacy (P) criteria.
+  references:
+    - https://www.aicpa.org/interestareas/frc/assuranceadvisoryservices/sorhome
+    - https://documentation.wazuh.com/current/compliance/
+
+requirements:
+  title: "Kubernetes or Linux host detected"
+  condition: any
+  rules:
+    - "f:/etc/kubernetes/manifests"
+    - "d:/var/lib/kubelet"
+    - "f:/etc/os-release"
+
+checks:
+  # ============================================================
+  # CC6 — Logical and Physical Access Controls
+  # ============================================================
+
+  - id: 80100
+    title: "CC6.1: Logical access — RBAC authorization on API server"
+    description: "Verify the API server uses RBAC for authorization."
+    rationale: "SOC2 CC6.1 requires logical access security to protect against unauthorized access."
+    remediation: "Ensure --authorization-mode includes RBAC on the API server."
+    compliance:
+      - soc2: ["CC6.1"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--authorization-mode && r:RBAC"
+
+  - id: 80101
+    title: "CC6.1: Logical access — kubelet authentication"
+    description: "Ensure kubelet requires authentication."
+    rationale: "SOC2 CC6.1 requires restricting logical access to information assets."
+    remediation: "Set --anonymous-auth=false on the kubelet."
+    compliance:
+      - soc2: ["CC6.1"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:--anonymous-auth=false"
+      - "f:/var/lib/kubelet/config.yaml -> r:anonymous: && r:enabled: false"
+
+  - id: 80102
+    title: "CC6.1: Logical access — SSH root login disabled"
+    description: "Prevent direct root SSH access to nodes."
+    rationale: "SOC2 CC6.1 requires restricting access to authorized individuals."
+    remediation: "Set PermitRootLogin no in /etc/ssh/sshd_config."
+    compliance:
+      - soc2: ["CC6.1"]
+    condition: all
+    rules:
+      - 'f:/etc/ssh/sshd_config -> r:^\s*PermitRootLogin\s+no'
+
+  - id: 80103
+    title: "CC6.1: Least privilege — No wildcard RBAC"
+    description: "Ensure no RBAC roles grant wildcard permissions."
+    rationale: "SOC2 CC6.1 requires access based on need-to-know and least privilege."
+    remediation: "Replace wildcard verbs/resources with specific ones."
+    compliance:
+      - soc2: ["CC6.1"]
+    condition: none
+    rules:
+      - 'c:kubectl get clusterroles -o json -> r:"verbs":\s*\["\\*"\]'
+
+  - id: 80104
+    title: "CC6.3: Role-based access — Dedicated ServiceAccounts"
+    description: "Ensure pods use dedicated service accounts."
+    rationale: "SOC2 CC6.3 requires role-based access control."
+    remediation: "Create per-workload ServiceAccounts."
+    compliance:
+      - soc2: ["CC6.3"]
+    condition: none
+    rules:
+      - 'c:kubectl get pods --all-namespaces -o json -> r:"serviceAccountName":\s*"default"'
+
+  - id: 80105
+    title: "CC6.6: Network boundaries — NetworkPolicies deployed"
+    description: "Ensure network segmentation via Kubernetes NetworkPolicies."
+    rationale: "SOC2 CC6.6 requires restricting system boundaries."
+    remediation: "Create deny-all default NetworkPolicies, then whitelist required traffic."
+    compliance:
+      - soc2: ["CC6.6"]
+    condition: all
+    rules:
+      - 'c:kubectl get networkpolicy --all-namespaces -o json -> r:"items":\s*\[.+'
+
+  - id: 80106
+    title: "CC6.7: Data-in-transit encryption — etcd TLS"
+    description: "Ensure etcd client and peer connections use TLS."
+    rationale: "SOC2 CC6.7 requires restricting transmission and movement of data."
+    remediation: "Configure TLS certificates for etcd."
+    compliance:
+      - soc2: ["CC6.7"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:etcd && r:--cert-file"
+      - "c:ps -ef -> r:etcd && r:--peer-cert-file"
+
+  - id: 80107
+    title: "CC6.7: Data-at-rest encryption — etcd encryption"
+    description: "Ensure secrets are encrypted at rest in etcd."
+    rationale: "SOC2 CC6.7 requires protection of data at rest."
+    remediation: "Configure --encryption-provider-config on the API server."
+    compliance:
+      - soc2: ["CC6.7"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--encryption-provider-config"
+
+  # ============================================================
+  # CC7 — System Operations
+  # ============================================================
+
+  - id: 80200
+    title: "CC7.1: Intrusion detection — Wazuh agent running"
+    description: "Ensure Wazuh agent is operational for threat detection."
+    rationale: "SOC2 CC7.1 requires detecting unauthorized activities."
+    remediation: "Check Wazuh agent status with /var/ossec/bin/wazuh-control status."
+    compliance:
+      - soc2: ["CC7.1"]
+    condition: all
+    rules:
+      - "p:wazuh-agentd"
+
+  - id: 80201
+    title: "CC7.1: File integrity — FIM active"
+    description: "Ensure file integrity monitoring detects unauthorized changes."
+    rationale: "SOC2 CC7.1 requires change detection mechanisms."
+    remediation: "Ensure Wazuh syscheck is enabled."
+    compliance:
+      - soc2: ["CC7.1"]
+    condition: all
+    rules:
+      - "f:/var/ossec/etc/ossec.conf -> r:<syscheck> && !r:<disabled>yes"
+
+  - id: 80202
+    title: "CC7.1: Rootkit detection — Rootcheck enabled"
+    description: "Ensure rootkit and anomaly detection is active."
+    rationale: "SOC2 CC7.1 requires monitoring for indicators of compromise."
+    remediation: "Ensure rootcheck is enabled in ossec.conf."
+    compliance:
+      - soc2: ["CC7.1"]
+    condition: all
+    rules:
+      - "f:/var/ossec/etc/ossec.conf -> r:<rootcheck> && !r:<disabled>yes"
+
+  - id: 80203
+    title: "CC7.2: Monitoring — Audit logging active"
+    description: "Ensure system and Kubernetes audit logging are configured."
+    rationale: "SOC2 CC7.2 requires monitoring system components for anomalies."
+    remediation: "Enable auditd and K8s API audit logging."
+    compliance:
+      - soc2: ["CC7.2"]
+    condition: all
+    rules:
+      - "c:systemctl is-enabled auditd -> r:enabled"
+
+  - id: 80204
+    title: "CC7.2: Monitoring — K8s API audit trail"
+    description: "Ensure Kubernetes API server logs all requests."
+    rationale: "SOC2 CC7.2 requires an audit trail of system activities."
+    remediation: "Set --audit-log-path on the API server."
+    compliance:
+      - soc2: ["CC7.2"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-path"
+
+  # ============================================================
+  # CC8 — Change Management
+  # ============================================================
+
+  - id: 80300
+    title: "CC8.1: Change management — Config file integrity"
+    description: "Ensure kubelet and API server config files have correct permissions."
+    rationale: "SOC2 CC8.1 requires controlled changes through the change management process."
+    remediation: "Set correct ownership and permissions on K8s configuration files."
+    compliance:
+      - soc2: ["CC8.1"]
+    condition: all
+    rules:
+      - "c:stat -c %U:%G /etc/kubernetes/manifests/kube-apiserver.yaml -> r:^root:root$"
+
+  - id: 80301
+    title: "CC8.1: Change management — Certificate rotation"
+    description: "Ensure kubelet certificates auto-rotate."
+    rationale: "SOC2 CC8.1 requires managing changes to infrastructure components."
+    remediation: "Ensure --rotate-certificates is not set to false."
+    compliance:
+      - soc2: ["CC8.1"]
+    condition: all
+    rules:
+      - "not c:ps -ef -> r:kubelet && r:--rotate-certificates=false"
+
+  # ============================================================
+  # A1 — Availability
+  # ============================================================
+
+  - id: 80400
+    title: "A1.2: Recovery — NTP time synchronization"
+    description: "Ensure time synchronization for consistent logging and recovery."
+    rationale: "SOC2 A1.2 requires environmental protections and availability measures."
+    remediation: "Enable chrony or ntpd."
+    compliance:
+      - soc2: ["A1.2"]
+    condition: any
+    rules:
+      - "c:systemctl is-active chronyd -> r:active"
+      - "c:systemctl is-active ntpd -> r:active"
+      - "c:systemctl is-active systemd-timesyncd -> r:active"

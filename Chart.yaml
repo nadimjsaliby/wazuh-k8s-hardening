@@ -1,0 +1,57 @@
+apiVersion: v2
+name: wazuh-k8s-hardening
+description: >-
+  Enterprise-grade Helm chart deploying Wazuh agents with pre-configured
+  CIS, NIST 800-53, PCI-DSS, HIPAA, and SOC2 compliance policies.
+  Includes admission webhook enforcement, auto-remediation engine,
+  runtime threat detection, and Prometheus/Grafana observability.
+type: application
+version: 1.0.0
+appVersion: "4.9.0"
+kubeVersion: ">=1.25.0-0"
+keywords:
+  - wazuh
+  - security
+  - cis-benchmark
+  - nist-800-53
+  - pci-dss
+  - hipaa
+  - soc2
+  - hardening
+  - compliance
+  - kubernetes-security
+  - admission-webhook
+  - runtime-security
+  - siem
+  - ids
+  - auto-remediation
+  - devsecops
+maintainers:
+  - name: Nadim Saliby
+    email: contact@nadimjsaliby.com
+home: https://github.com/nadimjsaliby/wazuh-k8s-hardening
+icon: https://wazuh.com/uploads/2022/05/WAZUH.png
+sources:
+  - https://github.com/nadimjsaliby/wazuh-k8s-hardening
+  - https://github.com/wazuh/wazuh
+  - https://documentation.wazuh.com
+  - https://www.cisecurity.org/benchmark/kubernetes
+annotations:
+  artifacthub.io/license: AGPL-3.0-or-later
+  artifacthub.io/category: security
+  artifacthub.io/signKey: |
+    fingerprint: ""
+    url: ""
+  artifacthub.io/changes: |
+    - kind: added
+      description: "Multi-framework compliance (CIS, NIST, PCI-DSS, HIPAA, SOC2)"
+    - kind: added
+      description: "Admission webhook for pre-deployment policy enforcement"
+    - kind: added
+      description: "Auto-remediation engine with configurable policies"
+    - kind: added
+      description: "Runtime threat detection (cryptomining, container escape, reverse shells)"
+    - kind: added
+      description: "Prometheus metrics and Grafana dashboards"
+    - kind: added
+      description: "Scheduled compliance report generation"

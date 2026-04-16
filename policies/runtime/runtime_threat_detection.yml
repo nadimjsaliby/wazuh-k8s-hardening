@@ -1,0 +1,305 @@
+policy:
+  id: "runtime_threat_detection"
+  file: "runtime_threat_detection.yml"
+  name: "Runtime Threat Detection — Kubernetes Behavioral Analysis"
+  description: >-
+    Detects active threats and suspicious runtime behavior on Kubernetes nodes.
+    Includes checks for cryptocurrency mining, container escape attempts,
+    reverse shells, credential harvesting, lateral movement, persistence
+    mechanisms, and data exfiltration indicators.
+  references:
+    - https://attack.mitre.org/matrices/enterprise/containers/
+    - https://microsoft.github.io/Threat-Matrix-for-Kubernetes/
+    - https://documentation.wazuh.com/current/user-manual/capabilities/sec-config-assessment/
+
+requirements:
+  title: "Linux host with container runtime"
+  condition: any
+  rules:
+    - "p:containerd"
+    - "p:dockerd"
+    - "p:crio"
+    - "d:/var/lib/kubelet"
+
+checks:
+  # ============================================================
+  # T1610 — Cryptomining Detection
+  # ============================================================
+
+  - id: 90100
+    title: "Cryptominer process detection — xmrig"
+    description: "Detect running xmrig or known cryptocurrency mining processes."
+    rationale: "Cryptojacking is the most common attack in Kubernetes. MITRE ATT&CK T1496."
+    remediation: "Kill the mining process. Investigate the container image and deployment source. Rotate compromised credentials."
+    compliance:
+      - mitre_attack: ["T1496"]
+    condition: none
+    rules:
+      - "p:xmrig"
+      - "p:minerd"
+      - "p:cpuminer"
+      - "p:minergate"
+      - "p:ethminer"
+      - "p:cgminer"
+      - "p:bfgminer"
+      - "p:nbminer"
+      - "p:t-rex"
+      - "p:gminer"
+      - "p:lolminer"
+
+  - id: 90101
+    title: "Cryptominer connection — Stratum protocol detection"
+    description: "Detect network connections to common mining pool ports (stratum protocol)."
+    rationale: "Mining processes connect to pools over stratum protocol on known ports."
+    remediation: "Block egress to mining pool ports. Investigate source container."
+    compliance:
+      - mitre_attack: ["T1496"]
+    condition: none
+    rules:
+      - "c:ss -tnp -> r::3333\\s|:4444\\s|:8333\\s|:14444\\s|:45700\\s"
+
+  - id: 90102
+    title: "Cryptominer indicators — Suspicious CPU usage"
+    description: "Detect processes consuming >90% CPU (potential mining indicator)."
+    rationale: "Cryptocurrency miners typically max out CPU resources."
+    remediation: "Identify the process and container. Verify legitimacy."
+    compliance:
+      - mitre_attack: ["T1496"]
+    condition: none
+    rules:
+      - 'c:ps aux --sort=-%cpu -> r:\s9[0-9]\.[0-9]|100\.[0-9]'
+
+  # ============================================================
+  # T1611 — Container Escape Detection
+  # ============================================================
+
+  - id: 90200
+    title: "Container escape — nsenter usage"
+    description: "Detect nsenter being used, which can break out of container namespaces."
+    rationale: "nsenter allows entering host namespaces from a container. MITRE ATT&CK T1611."
+    remediation: "Investigate the container. Remove nsenter from container images. Enforce seccomp/AppArmor."
+    compliance:
+      - mitre_attack: ["T1611"]
+    condition: none
+    rules:
+      - "p:nsenter"
+
+  - id: 90201
+    title: "Container escape — Host mount abuse"
+    description: "Detect containers mounting the host Docker socket or containerd socket."
+    rationale: "Mounting container runtime sockets allows spawning privileged containers on the host."
+    remediation: "Remove hostPath mounts for /var/run/docker.sock and /run/containerd/containerd.sock."
+    compliance:
+      - mitre_attack: ["T1611"]
+    condition: none
+    rules:
+      - "c:mount -> r:docker.sock"
+      - "c:mount -> r:containerd.sock"
+
+  - id: 90202
+    title: "Container escape — cgroup escape attempts"
+    description: "Detect write attempts to cgroup release_agent (CVE-2022-0492 style escape)."
+    rationale: "Writing to cgroup release_agent is a known container escape technique."
+    remediation: "Patch the kernel. Enforce seccomp profiles. Drop all capabilities."
+    compliance:
+      - mitre_attack: ["T1611"]
+    condition: none
+    rules:
+      - "c:find /sys/fs/cgroup -name release_agent -not -empty 2>/dev/null -> r:."
+
+  - id: 90203
+    title: "Container escape — Privileged container detection"
+    description: "Detect currently running privileged containers via /proc."
+    rationale: "Privileged containers have full host access. MITRE T1611."
+    remediation: "Remove privileged: true from pod specs. Use specific capabilities instead."
+    compliance:
+      - mitre_attack: ["T1611"]
+    condition: none
+    rules:
+      - 'c:kubectl get pods --all-namespaces -o json -> r:"privileged":\s*true'
+
+  # ============================================================
+  # T1059 — Reverse Shell Detection
+  # ============================================================
+
+  - id: 90300
+    title: "Reverse shell — bash/sh network redirect"
+    description: "Detect shell processes with network socket redirections (reverse shell indicators)."
+    rationale: "Reverse shells are primary post-exploitation tools. MITRE ATT&CK T1059."
+    remediation: "Kill the process. Isolate the node. Investigate the entry vector."
+    compliance:
+      - mitre_attack: ["T1059"]
+    condition: none
+    rules:
+      - "c:ls -la /proc/*/fd 2>/dev/null -> r:socket:\\[.*\\] && r:/proc/.*/fd/[012]"
+
+  - id: 90301
+    title: "Reverse shell — Common reverse shell tools"
+    description: "Detect known reverse shell tools running on the system."
+    rationale: "Tools like ncat, socat, and netcat are commonly used for reverse shells."
+    remediation: "Kill the process. Remove these tools from container images."
+    compliance:
+      - mitre_attack: ["T1059"]
+    condition: none
+    rules:
+      - "p:ncat -e"
+      - "p:nc -e"
+      - "p:socat TCP"
+
+  # ============================================================
+  # T1552 — Credential Harvesting
+  # ============================================================
+
+  - id: 90400
+    title: "Credential access — ServiceAccount token theft"
+    description: "Detect processes reading Kubernetes service account tokens."
+    rationale: "Attackers steal SA tokens to authenticate against the K8s API. MITRE T1552.001."
+    remediation: "Set automountServiceAccountToken: false where tokens aren't needed."
+    compliance:
+      - mitre_attack: ["T1552.001"]
+    condition: none
+    rules:
+      - "c:find /proc -maxdepth 4 -name maps -exec grep -l serviceaccount {} \\; 2>/dev/null -> r:/proc"
+
+  - id: 90401
+    title: "Credential access — Cloud metadata endpoint"
+    description: "Detect connections to cloud instance metadata services (169.254.169.254)."
+    rationale: "Attackers query metadata endpoints to steal IAM credentials. MITRE T1552.005."
+    remediation: "Block metadata endpoint access via NetworkPolicy. Use IAM roles for service accounts."
+    compliance:
+      - mitre_attack: ["T1552.005"]
+    condition: none
+    rules:
+      - "c:ss -tnp -> r:169\\.254\\.169\\.254"
+
+  - id: 90402
+    title: "Credential access — SSH private key scanning"
+    description: "Detect processes scanning for SSH private keys in common locations."
+    rationale: "Attackers harvest SSH keys for lateral movement. MITRE T1552.004."
+    remediation: "Restrict file permissions. Don't mount host SSH directories into containers."
+    compliance:
+      - mitre_attack: ["T1552.004"]
+    condition: none
+    rules:
+      - "c:find /home -name id_rsa -o -name id_ed25519 -o -name id_ecdsa 2>/dev/null -> r:id_"
+
+  # ============================================================
+  # T1053 — Persistence Mechanisms
+  # ============================================================
+
+  - id: 90500
+    title: "Persistence — Unauthorized cron jobs"
+    description: "Detect recently created cron jobs that may indicate persistence."
+    rationale: "Attackers create cron jobs for persistent access. MITRE T1053.003."
+    remediation: "Review and remove unauthorized cron entries."
+    compliance:
+      - mitre_attack: ["T1053.003"]
+    condition: none
+    rules:
+      - "c:find /var/spool/cron -type f -mmin -60 2>/dev/null -> r:."
+      - "c:find /etc/cron.d -type f -mmin -60 2>/dev/null -> r:."
+
+  - id: 90501
+    title: "Persistence — Modified system binaries"
+    description: "Check that critical system binaries haven't been replaced recently."
+    rationale: "Attackers replace system binaries to maintain persistence. MITRE T1554."
+    remediation: "Restore binaries from known-good backup. Rebuild the node."
+    compliance:
+      - mitre_attack: ["T1554"]
+    condition: none
+    rules:
+      - "c:find /usr/bin /usr/sbin /bin /sbin -type f -mmin -60 2>/dev/null -> r:."
+
+  - id: 90502
+    title: "Persistence — Unauthorized systemd services"
+    description: "Detect recently created systemd service files."
+    rationale: "Attackers create systemd services for persistence. MITRE T1543.002."
+    remediation: "Review and remove unauthorized service files."
+    compliance:
+      - mitre_attack: ["T1543.002"]
+    condition: none
+    rules:
+      - "c:find /etc/systemd/system -type f -mmin -60 -name *.service 2>/dev/null -> r:."
+
+  # ============================================================
+  # T1046 — Lateral Movement / Reconnaissance
+  # ============================================================
+
+  - id: 90600
+    title: "Reconnaissance — Internal port scanning"
+    description: "Detect tools commonly used for internal network scanning."
+    rationale: "Port scanning is a precursor to lateral movement. MITRE T1046."
+    remediation: "Remove scanning tools from containers. Investigate source."
+    compliance:
+      - mitre_attack: ["T1046"]
+    condition: none
+    rules:
+      - "p:nmap"
+      - "p:masscan"
+      - "p:zmap"
+
+  - id: 90601
+    title: "Reconnaissance — Kubernetes API enumeration"
+    description: "Detect kubectl or curl used to enumerate Kubernetes API from within containers."
+    rationale: "Attackers enumerate the K8s API to find attack vectors. MITRE T1613."
+    remediation: "Restrict RBAC. Set automountServiceAccountToken: false."
+    compliance:
+      - mitre_attack: ["T1613"]
+    condition: none
+    rules:
+      - 'c:ps aux -> r:kubectl.*get.*secret'
+      - 'c:ps aux -> r:curl.*https://kubernetes.default'
+
+  # ============================================================
+  # T1048 — Data Exfiltration
+  # ============================================================
+
+  - id: 90700
+    title: "Exfiltration — DNS tunneling indicators"
+    description: "Detect processes that may be performing DNS tunneling."
+    rationale: "DNS tunneling exfiltrates data via DNS queries. MITRE T1048.001."
+    remediation: "Investigate DNS query patterns. Block unauthorized DNS resolvers."
+    compliance:
+      - mitre_attack: ["T1048.001"]
+    condition: none
+    rules:
+      - "p:iodine"
+      - "p:dnscat"
+      - "p:dns2tcp"
+
+  - id: 90701
+    title: "Exfiltration — Large outbound data transfer"
+    description: "Detect processes with unusual outbound network connections."
+    rationale: "Large data transfers may indicate exfiltration. MITRE T1048."
+    remediation: "Monitor egress traffic. Implement data loss prevention controls."
+    compliance:
+      - mitre_attack: ["T1048"]
+    condition: none
+    rules:
+      - "c:ss -tnp state established -> r:ESTAB"
+
+  # ============================================================
+  # Defense Evasion
+  # ============================================================
+
+  - id: 90800
+    title: "Defense evasion — Log deletion attempts"
+    description: "Detect if critical log files have been recently truncated or deleted."
+    rationale: "Attackers clear logs to cover tracks. MITRE T1070.002."
+    remediation: "Forward logs to external SIEM immediately. Investigate the incident."
+    compliance:
+      - mitre_attack: ["T1070.002"]
+    condition: none
+    rules:
+      - "c:find /var/log -name *.log -empty -mmin -30 2>/dev/null -> r:."
+
+  - id: 90801
+    title: "Defense evasion — History file tampering"
+    description: "Detect if bash history files have been recently cleared."
+    rationale: "Attackers clear shell history to hide their commands. MITRE T1070.003."
+    remediation: "Forward command history to audit system. Investigate the session."
+    compliance:
+      - mitre_attack: ["T1070.003"]
+    condition: none
+    rules:
+      - "c:find /root /home -name .bash_history -empty 2>/dev/null -> r:."

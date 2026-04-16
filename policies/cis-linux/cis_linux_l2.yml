@@ -1,0 +1,234 @@
+policy:
+  id: "cis_linux_l2"
+  file: "cis_linux_l2.yml"
+  name: "CIS Distribution Independent Linux Benchmark v2.0.0 - Level 2"
+  description: "This policy includes all Level 1 checks plus additional Level 2 controls for environments requiring deeper hardening on Kubernetes node hosts."
+  references:
+    - https://www.cisecurity.org/benchmark/distribution_independent_linux
+    - https://documentation.wazuh.com/current/user-manual/capabilities/sec-config-assessment/
+
+requirements:
+  title: "Check Linux OS"
+  description: "Requirements for running the CIS Linux Benchmark Level 2 checks."
+  condition: any
+  rules:
+    - "f:/etc/os-release"
+    - "f:/etc/redhat-release"
+    - "f:/etc/debian_version"
+
+checks:
+  # ==========================================
+  # 1 - Initial Setup (L2 additions)
+  # ==========================================
+
+  - id: 40100
+    title: "Ensure separate partition exists for /var"
+    description: "The /var directory should be on a separate partition."
+    rationale: "Prevents /var from filling up root filesystem. Logs and temp files reside here."
+    remediation: "Create a separate partition for /var during installation or migration."
+    compliance:
+      - cis: ["1.1.6"]
+      - cis_csc_v8: ["4.8"]
+    condition: all
+    rules:
+      - "c:mount -> r:/var\\s"
+
+  - id: 40101
+    title: "Ensure separate partition exists for /var/tmp"
+    description: "The /var/tmp directory should be on a separate partition."
+    rationale: "Prevents /var/tmp from filling up the /var partition."
+    remediation: "Create a separate partition for /var/tmp."
+    compliance:
+      - cis: ["1.1.7"]
+      - cis_csc_v8: ["4.8"]
+    condition: all
+    rules:
+      - "c:mount -> r:/var/tmp"
+
+  - id: 40102
+    title: "Ensure separate partition exists for /var/log"
+    description: "The /var/log directory should be on a separate partition."
+    rationale: "Log files growing too large will not impact the root filesystem."
+    remediation: "Create a separate partition for /var/log."
+    compliance:
+      - cis: ["1.1.11"]
+      - cis_csc_v8: ["8.3"]
+    condition: all
+    rules:
+      - "c:mount -> r:/var/log\\s"
+
+  - id: 40103
+    title: "Ensure separate partition exists for /var/log/audit"
+    description: "The /var/log/audit directory should be on a separate partition."
+    rationale: "Audit log data should be stored on a separate partition to prevent other log data from filling the partition."
+    remediation: "Create a separate partition for /var/log/audit."
+    compliance:
+      - cis: ["1.1.12"]
+      - cis_csc_v8: ["8.3"]
+    condition: all
+    rules:
+      - "c:mount -> r:/var/log/audit"
+
+  - id: 40104
+    title: "Ensure separate partition exists for /home"
+    description: "The /home directory should be on a separate partition."
+    rationale: "User home directories can fill up disk space. Isolating /home protects the system."
+    remediation: "Create a separate partition for /home."
+    compliance:
+      - cis: ["1.1.13"]
+      - cis_csc_v8: ["4.8"]
+    condition: all
+    rules:
+      - "c:mount -> r:/home"
+
+  # ==========================================
+  # 3 - Network Configuration (L2 additions)
+  # ==========================================
+
+  - id: 40300
+    title: "Ensure IPv6 router advertisements are not accepted"
+    description: "This setting disables IPv6 router advertisements."
+    rationale: "Prevents potentially malicious IPv6 routing updates on systems that don't need them."
+    remediation: "Set net.ipv6.conf.all.accept_ra=0 and net.ipv6.conf.default.accept_ra=0."
+    compliance:
+      - cis: ["3.3.9"]
+      - cis_csc_v8: ["4.1"]
+    condition: all
+    rules:
+      - "c:sysctl net.ipv6.conf.all.accept_ra -> r:= 0"
+      - "c:sysctl net.ipv6.conf.default.accept_ra -> r:= 0"
+
+  - id: 40301
+    title: "Ensure TCP SYN cookies are enabled"
+    description: "When tcp_syncookies is enabled, the kernel handles TCP SYN packets normally until the backlog queue is full."
+    rationale: "Attackers can perform SYN flood attacks. SYN cookies mitigate this."
+    remediation: "Set net.ipv4.tcp_syncookies=1 in /etc/sysctl.conf."
+    compliance:
+      - cis: ["3.3.8"]
+      - cis_csc_v8: ["4.1"]
+    condition: all
+    rules:
+      - "c:sysctl net.ipv4.tcp_syncookies -> r:= 1"
+
+  # ==========================================
+  # 4 - Logging and Auditing (L2 additions)
+  # ==========================================
+
+  - id: 40400
+    title: "Ensure audit log storage size is configured"
+    description: "Configure the maximum size of the audit log file."
+    rationale: "Ensures audit logs are rotated before filling disk."
+    remediation: "Set max_log_file parameter in /etc/audit/auditd.conf."
+    compliance:
+      - cis: ["4.1.1.1"]
+      - cis_csc_v8: ["8.3"]
+    condition: all
+    rules:
+      - "f:/etc/audit/auditd.conf -> r:^max_log_file\\s*="
+
+  - id: 40401
+    title: "Ensure system is disabled when audit logs are full"
+    description: "The auditd daemon can be configured to halt the system when audit logs are full."
+    rationale: "In high-security environments, it's better to halt the system than lose audit data."
+    remediation: "Set space_left_action=email, action_mail_acct=root, admin_space_left_action=halt in /etc/audit/auditd.conf."
+    compliance:
+      - cis: ["4.1.1.2"]
+      - cis_csc_v8: ["8.3"]
+    condition: all
+    rules:
+      - "f:/etc/audit/auditd.conf -> r:^space_left_action\\s*=\\s*email"
+      - "f:/etc/audit/auditd.conf -> r:^admin_space_left_action\\s*=\\s*halt"
+
+  - id: 40402
+    title: "Ensure events that modify date and time are collected"
+    description: "Capture events where the system date or time has been modified."
+    rationale: "Unexpected changes to the system time can be a sign of malicious activity."
+    remediation: "Add appropriate audit rules for adjtimex, settimeofday, stime, and clock_settime system calls."
+    compliance:
+      - cis: ["4.1.3"]
+      - cis_csc_v8: ["8.5"]
+    condition: all
+    rules:
+      - "c:auditctl -l -> r:adjtimex|settimeofday|clock_settime"
+
+  - id: 40403
+    title: "Ensure events that modify user/group information are collected"
+    description: "Record events that modify user/group information including /etc/passwd, /etc/shadow, /etc/group, and /etc/gshadow."
+    rationale: "Unexpected modifications to these files may indicate unauthorized user management."
+    remediation: "Add audit watch rules for /etc/group, /etc/passwd, /etc/gshadow, /etc/shadow."
+    compliance:
+      - cis: ["4.1.4"]
+      - cis_csc_v8: ["8.5"]
+    condition: all
+    rules:
+      - "c:auditctl -l -> r:-w /etc/group"
+      - "c:auditctl -l -> r:-w /etc/passwd"
+      - "c:auditctl -l -> r:-w /etc/shadow"
+
+  - id: 40404
+    title: "Ensure login and logout events are collected"
+    description: "Monitor login and logout events."
+    rationale: "Provides a trail for investigating potential intrusions."
+    remediation: "Add audit rules for /var/log/lastlog, /var/run/faillock, and /var/log/tallylog."
+    compliance:
+      - cis: ["4.1.8"]
+      - cis_csc_v8: ["8.5"]
+    condition: all
+    rules:
+      - "c:auditctl -l -> r:-w /var/log/lastlog"
+
+  # ==========================================
+  # 5 - Access, Authentication (L2 additions)
+  # ==========================================
+
+  - id: 40500
+    title: "Ensure SSH Idle Timeout Interval is configured"
+    description: "Configure the SSH idle timeout interval to automatically disconnect idle sessions."
+    rationale: "Unattended SSH sessions increase the risk of unauthorized access."
+    remediation: "Set ClientAliveInterval 300 and ClientAliveCountMax 3 in /etc/ssh/sshd_config."
+    compliance:
+      - cis: ["5.3.16"]
+      - cis_csc_v8: ["5.6"]
+    condition: all
+    rules:
+      - 'f:/etc/ssh/sshd_config -> n:^\s*ClientAliveInterval\s+(\d+) compare <= 300'
+      - 'f:/etc/ssh/sshd_config -> n:^\s*ClientAliveCountMax\s+(\d+) compare <= 3'
+
+  - id: 40501
+    title: "Ensure SSH LoginGraceTime is set to one minute or less"
+    description: "Set the LoginGraceTime parameter to restrict the time allowed to authenticate."
+    rationale: "Reduces the window for brute-force attacks against the SSH service."
+    remediation: "Set LoginGraceTime 60 in /etc/ssh/sshd_config."
+    compliance:
+      - cis: ["5.3.17"]
+      - cis_csc_v8: ["8.5"]
+    condition: all
+    rules:
+      - 'f:/etc/ssh/sshd_config -> n:^\s*LoginGraceTime\s+(\d+) compare <= 60'
+
+  - id: 40502
+    title: "Ensure SSH access is limited"
+    description: "Limit SSH access to specific users or groups."
+    rationale: "Restricting which users can access SSH reduces the attack surface."
+    remediation: "Set AllowUsers or AllowGroups in /etc/ssh/sshd_config."
+    compliance:
+      - cis: ["5.3.4"]
+      - cis_csc_v8: ["5.4"]
+    condition: any
+    rules:
+      - 'f:/etc/ssh/sshd_config -> r:^\s*AllowUsers\s+'
+      - 'f:/etc/ssh/sshd_config -> r:^\s*AllowGroups\s+'
+
+  - id: 40503
+    title: "Ensure password creation requirements are configured"
+    description: "Password complexity requirements should be enforced."
+    rationale: "Strong passwords reduce the risk of brute-force attacks."
+    remediation: "Configure pam_pwquality.so with minlen=14, minclass=4 or equivalent settings."
+    compliance:
+      - cis: ["5.4.1"]
+      - cis_csc_v8: ["5.2"]
+    condition: any
+    rules:
+      - "f:/etc/security/pwquality.conf -> r:^minlen\\s*=\\s*\\d+"
+      - "f:/etc/pam.d/common-password -> r:pam_pwquality.so"
+      - "f:/etc/pam.d/system-auth -> r:pam_pwquality.so"

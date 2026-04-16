@@ -1,0 +1,211 @@
+policy:
+  id: "hipaa_k8s"
+  file: "hipaa_k8s.yml"
+  name: "HIPAA Security Rule — Kubernetes Technical Safeguards"
+  description: >-
+    Maps HIPAA Security Rule 45 CFR 164.312 Technical Safeguards to
+    Kubernetes and host-level checks. Covers access control, audit controls,
+    integrity, person/entity authentication, and transmission security.
+  references:
+    - https://www.hhs.gov/hipaa/for-professionals/security/laws-regulations/index.html
+    - https://documentation.wazuh.com/current/hipaa/
+
+requirements:
+  title: "Kubernetes or Linux host detected"
+  condition: any
+  rules:
+    - "f:/etc/kubernetes/manifests"
+    - "d:/var/lib/kubelet"
+    - "f:/etc/os-release"
+
+checks:
+  # ============================================================
+  # 164.312(a) — Access Control
+  # ============================================================
+
+  - id: 70100
+    title: "164.312(a)(1): Unique user identification — No default ServiceAccounts in use"
+    description: "Ensure pods use dedicated service accounts, not the default."
+    rationale: "HIPAA requires unique user identification. Default accounts prevent accountability."
+    remediation: "Create dedicated ServiceAccounts for each workload."
+    compliance:
+      - hipaa: ["164.312(a)(1)"]
+    condition: none
+    rules:
+      - 'c:kubectl get pods --all-namespaces -o json -> r:"serviceAccountName":\s*"default"'
+
+  - id: 70101
+    title: "164.312(a)(1): Access control — RBAC enabled"
+    description: "Ensure the Kubernetes API server uses RBAC authorization."
+    rationale: "HIPAA requires implementing technical policies for granting access to ePHI."
+    remediation: "Ensure --authorization-mode includes RBAC."
+    compliance:
+      - hipaa: ["164.312(a)(1)"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--authorization-mode && r:RBAC"
+
+  - id: 70102
+    title: "164.312(a)(2)(i): Unique user ID — kubelet authentication required"
+    description: "Disable anonymous authentication on kubelet."
+    rationale: "HIPAA requires unique user identification for tracking ePHI access."
+    remediation: "Set --anonymous-auth=false."
+    compliance:
+      - hipaa: ["164.312(a)(2)(i)"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:--anonymous-auth=false"
+      - "f:/var/lib/kubelet/config.yaml -> r:anonymous: && r:enabled: false"
+
+  - id: 70103
+    title: "164.312(a)(2)(iii): Automatic logoff — SSH idle timeout"
+    description: "Ensure SSH sessions auto-disconnect after period of inactivity."
+    rationale: "HIPAA requires automatic logoff after a predetermined time of inactivity."
+    remediation: "Set ClientAliveInterval 300 and ClientAliveCountMax 3 in sshd_config."
+    compliance:
+      - hipaa: ["164.312(a)(2)(iii)"]
+    condition: all
+    rules:
+      - 'f:/etc/ssh/sshd_config -> n:^\s*ClientAliveInterval\s+(\d+) compare <= 300'
+      - 'f:/etc/ssh/sshd_config -> n:^\s*ClientAliveCountMax\s+(\d+) compare <= 3'
+
+  - id: 70104
+    title: "164.312(a)(2)(iv): Encryption at rest — etcd encryption"
+    description: "Ensure data stored in etcd is encrypted."
+    rationale: "HIPAA requires encrypting ePHI. Kubernetes secrets may contain ePHI."
+    remediation: "Configure --encryption-provider-config on the API server."
+    compliance:
+      - hipaa: ["164.312(a)(2)(iv)"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--encryption-provider-config"
+
+  # ============================================================
+  # 164.312(b) — Audit Controls
+  # ============================================================
+
+  - id: 70200
+    title: "164.312(b): Audit controls — auditd service running"
+    description: "Ensure system audit logging is active."
+    rationale: "HIPAA requires hardware, software, and procedural mechanisms to record and examine ePHI access."
+    remediation: "Enable auditd service."
+    compliance:
+      - hipaa: ["164.312(b)"]
+    condition: all
+    rules:
+      - "c:systemctl is-enabled auditd -> r:enabled"
+
+  - id: 70201
+    title: "164.312(b): Audit controls — K8s audit logging"
+    description: "Ensure Kubernetes API server audit logging is configured."
+    rationale: "HIPAA requires examining activity in systems that contain or use ePHI."
+    remediation: "Configure --audit-log-path and --audit-log-maxage on the API server."
+    compliance:
+      - hipaa: ["164.312(b)"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-path"
+
+  - id: 70202
+    title: "164.312(b): Audit controls — Syslog service running"
+    description: "Ensure system logging is active."
+    rationale: "HIPAA requires mechanisms to record system events for examination."
+    remediation: "Enable rsyslog or syslog-ng."
+    compliance:
+      - hipaa: ["164.312(b)"]
+    condition: any
+    rules:
+      - "c:systemctl is-active rsyslog -> r:active"
+      - "c:systemctl is-active syslog-ng -> r:active"
+
+  # ============================================================
+  # 164.312(c) — Integrity
+  # ============================================================
+
+  - id: 70300
+    title: "164.312(c)(1): Integrity — File integrity monitoring active"
+    description: "Ensure FIM is enabled to detect unauthorized ePHI modifications."
+    rationale: "HIPAA requires protecting ePHI from improper alteration or destruction."
+    remediation: "Ensure Wazuh syscheck is enabled."
+    compliance:
+      - hipaa: ["164.312(c)(1)"]
+    condition: all
+    rules:
+      - "f:/var/ossec/etc/ossec.conf -> r:<syscheck> && !r:<disabled>yes"
+
+  - id: 70301
+    title: "164.312(c)(2): Authentication of ePHI — kubelet cert rotation"
+    description: "Ensure kubelet certificates auto-rotate to maintain authentication integrity."
+    rationale: "HIPAA requires mechanisms to authenticate ePHI. Certificate management is critical."
+    remediation: "Ensure --rotate-certificates is not set to false."
+    compliance:
+      - hipaa: ["164.312(c)(2)"]
+    condition: all
+    rules:
+      - "not c:ps -ef -> r:kubelet && r:--rotate-certificates=false"
+
+  # ============================================================
+  # 164.312(d) — Person or Entity Authentication
+  # ============================================================
+
+  - id: 70400
+    title: "164.312(d): Authentication — SSH PermitEmptyPasswords disabled"
+    description: "Ensure SSH does not allow empty passwords."
+    rationale: "HIPAA requires verifying that a person or entity seeking ePHI access is who they claim."
+    remediation: "Set PermitEmptyPasswords no in sshd_config."
+    compliance:
+      - hipaa: ["164.312(d)"]
+    condition: all
+    rules:
+      - 'f:/etc/ssh/sshd_config -> r:^\s*PermitEmptyPasswords\s+no'
+
+  - id: 70401
+    title: "164.312(d): Authentication — Password complexity"
+    description: "Ensure password requirements are configured."
+    rationale: "HIPAA requires authentication mechanisms for person/entity verification."
+    remediation: "Configure pam_pwquality.so."
+    compliance:
+      - hipaa: ["164.312(d)"]
+    condition: any
+    rules:
+      - "f:/etc/security/pwquality.conf -> r:^minlen"
+      - "f:/etc/pam.d/common-password -> r:pam_pwquality.so"
+
+  # ============================================================
+  # 164.312(e) — Transmission Security
+  # ============================================================
+
+  - id: 70500
+    title: "164.312(e)(1): Transmission security — etcd TLS"
+    description: "Ensure etcd communication is TLS-encrypted."
+    rationale: "HIPAA requires guarding against unauthorized access to ePHI during electronic transmission."
+    remediation: "Configure TLS certs for etcd client and peer connections."
+    compliance:
+      - hipaa: ["164.312(e)(1)"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:etcd && r:--cert-file"
+      - "c:ps -ef -> r:etcd && r:--peer-cert-file"
+
+  - id: 70501
+    title: "164.312(e)(2)(ii): Encryption in transit — SSH only protocol 2"
+    description: "Ensure strong encryption for remote access."
+    rationale: "HIPAA requires encrypting ePHI in transit wherever deemed appropriate."
+    remediation: "Ensure SSH Protocol 1 is not in use."
+    compliance:
+      - hipaa: ["164.312(e)(2)(ii)"]
+    condition: all
+    rules:
+      - "not f:/etc/ssh/sshd_config -> r:^\\s*Protocol\\s+1"
+
+  - id: 70502
+    title: "164.312(e)(2)(ii): Encryption in transit — ICMP redirects disabled"
+    description: "Prevent ICMP redirect attacks that could intercept ePHI in transit."
+    rationale: "HIPAA requires integrity controls for ePHI transmission."
+    remediation: "Set net.ipv4.conf.all.accept_redirects=0."
+    compliance:
+      - hipaa: ["164.312(e)(2)(ii)"]
+    condition: all
+    rules:
+      - "c:sysctl net.ipv4.conf.all.accept_redirects -> r:= 0"
+      - "c:sysctl net.ipv4.conf.default.accept_redirects -> r:= 0"

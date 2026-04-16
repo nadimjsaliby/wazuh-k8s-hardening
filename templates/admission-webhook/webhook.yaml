@@ -1,0 +1,45 @@
+{{- if .Values.admissionWebhook.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}-policy-enforcement
+  labels:
+    {{- include "wazuh-k8s-hardening.webhookLabels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.admissionWebhook.certManager.enabled }}
+    cert-manager.io/inject-ca-from: "{{ .Release.Namespace }}/{{ include "wazuh-k8s-hardening.webhookCertName" . }}"
+    {{- end }}
+webhooks:
+  - name: validate.wazuh-k8s-hardening.io
+    admissionReviewVersions: ["v1", "v1beta1"]
+    sideEffects: None
+    timeoutSeconds: 10
+    failurePolicy: {{ .Values.admissionWebhook.failurePolicy }}
+    clientConfig:
+      service:
+        name: {{ include "wazuh-k8s-hardening.webhookServiceName" . }}
+        namespace: {{ .Release.Namespace }}
+        path: /validate
+        port: 443
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["pods"]
+        scope: "Namespaced"
+      - apiGroups: ["apps"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+        scope: "Namespaced"
+      - apiGroups: ["batch"]
+        apiVersions: ["v1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["jobs", "cronjobs"]
+        scope: "Namespaced"
+    {{- with .Values.admissionWebhook.namespaceSelector }}
+    namespaceSelector:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    matchPolicy: Equivalent
+{{- end }}

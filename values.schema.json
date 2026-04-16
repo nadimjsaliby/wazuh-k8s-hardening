@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Wazuh K8s Hardening Helm Values",
+  "description": "Schema validation for wazuh-k8s-hardening Helm chart values",
+  "type": "object",
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "clusterName": { "type": "string", "minLength": 1 },
+        "environment": { "type": "string", "enum": ["production", "staging", "development"] },
+        "organization": { "type": "string" },
+        "complianceContact": { "type": "string", "format": "email" }
+      },
+      "required": ["clusterName", "environment"]
+    },
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": { "type": "string", "minLength": 1 },
+        "pullPolicy": { "type": "string", "enum": ["Always", "IfNotPresent", "Never"] },
+        "tag": { "type": "string" }
+      },
+      "required": ["repository", "pullPolicy"]
+    },
+    "manager": {
+      "type": "object",
+      "properties": {
+        "host": { "type": "string", "minLength": 1 },
+        "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "registrationPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "protocol": { "type": "string", "enum": ["tcp", "udp"] },
+        "agentGroups": { "type": "string" },
+        "existingSecret": { "type": "string" },
+        "existingSecretKey": { "type": "string" },
+        "registrationPassword": { "type": "string" },
+        "failover": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "hosts": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "host": { "type": "string" },
+                  "port": { "type": "integer" },
+                  "protocol": { "type": "string", "enum": ["tcp", "udp"] }
+                },
+                "required": ["host"]
+              }
+            }
+          }
+        },
+        "tls": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "issuerRef": {
+              "type": "object",
+              "properties": {
+                "name": { "type": "string" },
+                "kind": { "type": "string", "enum": ["Issuer", "ClusterIssuer"] }
+              }
+            }
+          }
+        }
+      },
+      "required": ["host", "port"]
+    },
+    "compliance": {
+      "type": "object",
+      "properties": {
+        "cisKubernetes": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "profile": { "type": "string", "enum": ["L1", "L2"] },
+            "interval": { "type": "string", "pattern": "^[0-9]+$" }
+          }
+        },
+        "cisLinux": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "profile": { "type": "string", "enum": ["L1", "L2"] },
+            "interval": { "type": "string", "pattern": "^[0-9]+$" }
+          }
+        },
+        "nist80053": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string", "pattern": "^[0-9]+$" }
+          }
+        },
+        "pciDss": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string", "pattern": "^[0-9]+$" }
+          }
+        },
+        "hipaa": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string", "pattern": "^[0-9]+$" }
+          }
+        },
+        "soc2": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string", "pattern": "^[0-9]+$" }
+          }
+        },
+        "runtimeThreatDetection": {
+          "type": "object",
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "interval": { "type": "string", "pattern": "^[0-9]+$" }
+          }
+        }
+      }
+    },
+    "admissionWebhook": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "replicas": { "type": "integer", "minimum": 1 },
+        "failurePolicy": { "type": "string", "enum": ["Ignore", "Fail"] },
+        "policies": {
+          "type": "object",
+          "properties": {
+            "blockPrivileged": { "type": "boolean" },
+            "blockHostNetwork": { "type": "boolean" },
+            "blockHostPID": { "type": "boolean" },
+            "blockHostIPC": { "type": "boolean" },
+            "requireRunAsNonRoot": { "type": "boolean" },
+            "requireReadOnlyRootFilesystem": { "type": "boolean" },
+            "blockPrivilegeEscalation": { "type": "boolean" },
+            "requireImageDigest": { "type": "boolean" },
+            "blockLatestTag": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "autoRemediation": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "dryRun": { "type": "boolean" },
+        "schedule": { "type": "string" }
+      }
+    },
+    "networkPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" }
+      }
+    },
+    "podDisruptionBudget": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "minAvailable": { "type": ["string", "integer"] }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "properties": {
+        "limits": {
+          "type": "object",
+          "properties": {
+            "cpu": { "type": "string" },
+            "memory": { "type": "string" }
+          }
+        },
+        "requests": {
+          "type": "object",
+          "properties": {
+            "cpu": { "type": "string" },
+            "memory": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "required": ["manager", "image"]
+}

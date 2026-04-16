@@ -1,0 +1,102 @@
+{{- if .Values.admissionWebhook.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "wazuh-k8s-hardening.webhookServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.webhookLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.admissionWebhook.replicas }}
+  selector:
+    matchLabels:
+      {{- include "wazuh-k8s-hardening.webhookSelectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/admission-webhook/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "wazuh-k8s-hardening.webhookLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "wazuh-k8s-hardening.webhookServiceName" . }}
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              {{- include "wazuh-k8s-hardening.webhookSelectorLabels" . | nindent 14 }}
+      containers:
+        - name: webhook
+          image: "{{ .Values.admissionWebhook.image.repository }}:{{ .Values.admissionWebhook.image.tag }}"
+          imagePullPolicy: {{ .Values.admissionWebhook.image.pullPolicy }}
+          args:
+            - --tls-cert-file=/tls/tls.crt
+            - --tls-key-file=/tls/tls.key
+            - --config=/config/policy.json
+            - --port=8443
+          ports:
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+            - name: healthz
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: CLUSTER_NAME
+              value: {{ .Values.global.clusterName | quote }}
+            - name: LOG_LEVEL
+              value: "info"
+            - name: LOG_FORMAT
+              value: "json"
+          volumeMounts:
+            - name: tls-certs
+              mountPath: /tls
+              readOnly: true
+            - name: policy-config
+              mountPath: /config
+              readOnly: true
+          {{- with .Values.admissionWebhook.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+              scheme: HTTP
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: healthz
+              scheme: HTTP
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      volumes:
+        - name: tls-certs
+          secret:
+            secretName: {{ include "wazuh-k8s-hardening.webhookCertName" . }}
+            defaultMode: 0400
+        - name: policy-config
+          configMap:
+            name: {{ include "wazuh-k8s-hardening.webhookServiceName" . }}-config
+{{- end }}

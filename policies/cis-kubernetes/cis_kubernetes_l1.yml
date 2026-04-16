@@ -1,0 +1,294 @@
+policy:
+  id: "cis_kubernetes_l1"
+  file: "cis_kubernetes_l1.yml"
+  name: "CIS Kubernetes Benchmark v1.8.0 - Level 1"
+  description: "This policy file checks the CIS Kubernetes Benchmark Level 1 controls for worker nodes and cluster components."
+  references:
+    - https://www.cisecurity.org/benchmark/kubernetes
+    - https://documentation.wazuh.com/current/user-manual/capabilities/sec-config-assessment/
+
+requirements:
+  title: "Check Kubernetes is installed"
+  description: "Requirements for running the CIS Kubernetes Benchmark checks."
+  condition: any
+  rules:
+    - "f:/etc/kubernetes/manifests"
+    - "f:/etc/kubernetes/kubelet.conf"
+    - "d:/var/lib/kubelet"
+    - "p:kubelet"
+    - "p:kube-proxy"
+
+checks:
+  # ==========================================
+  # 1 - Control Plane Components
+  # ==========================================
+
+  # 1.1 Control Plane Node Configuration Files
+  - id: 10100
+    title: "Ensure that the API server pod specification file permissions are set to 600 or more restrictive"
+    description: "The API server pod specification file should have restrictive permissions."
+    rationale: "The API server pod specification file controls various parameters of the API server. Restricting its permissions helps protect against unauthorized modifications."
+    remediation: "Run chmod 600 /etc/kubernetes/manifests/kube-apiserver.yaml"
+    compliance:
+      - cis: ["1.1.1"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "c:stat -c %a /etc/kubernetes/manifests/kube-apiserver.yaml -> r:^600$|^400$|^000$"
+
+  - id: 10101
+    title: "Ensure that the API server pod specification file ownership is set to root:root"
+    description: "The API server pod specification file should be owned by root:root."
+    rationale: "Setting ownership to root:root ensures that only the superuser can modify the API server configuration."
+    remediation: "Run chown root:root /etc/kubernetes/manifests/kube-apiserver.yaml"
+    compliance:
+      - cis: ["1.1.2"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "c:stat -c %U:%G /etc/kubernetes/manifests/kube-apiserver.yaml -> r:^root:root$"
+
+  - id: 10102
+    title: "Ensure that the controller manager pod specification file permissions are set to 600 or more restrictive"
+    description: "The controller manager pod specification file should have restrictive permissions."
+    rationale: "The controller manager is responsible for running various controllers. Restricting permissions protects against unauthorized changes."
+    remediation: "Run chmod 600 /etc/kubernetes/manifests/kube-controller-manager.yaml"
+    compliance:
+      - cis: ["1.1.3"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "c:stat -c %a /etc/kubernetes/manifests/kube-controller-manager.yaml -> r:^600$|^400$|^000$"
+
+  - id: 10103
+    title: "Ensure that the controller manager pod specification file ownership is set to root:root"
+    description: "The controller manager pod specification file should be owned by root:root."
+    rationale: "Ensures only the superuser can modify the controller manager configuration."
+    remediation: "Run chown root:root /etc/kubernetes/manifests/kube-controller-manager.yaml"
+    compliance:
+      - cis: ["1.1.4"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "c:stat -c %U:%G /etc/kubernetes/manifests/kube-controller-manager.yaml -> r:^root:root$"
+
+  - id: 10104
+    title: "Ensure that the scheduler pod specification file permissions are set to 600 or more restrictive"
+    description: "The scheduler pod specification file should have restrictive permissions."
+    rationale: "The scheduler is responsible for scheduling pods on nodes. Restricting permissions ensures unauthorized users cannot modify its configuration."
+    remediation: "Run chmod 600 /etc/kubernetes/manifests/kube-scheduler.yaml"
+    compliance:
+      - cis: ["1.1.5"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "c:stat -c %a /etc/kubernetes/manifests/kube-scheduler.yaml -> r:^600$|^400$|^000$"
+
+  - id: 10105
+    title: "Ensure that the scheduler pod specification file ownership is set to root:root"
+    description: "The scheduler pod specification file should be owned by root:root."
+    rationale: "Ensures only the superuser can modify the scheduler configuration."
+    remediation: "Run chown root:root /etc/kubernetes/manifests/kube-scheduler.yaml"
+    compliance:
+      - cis: ["1.1.6"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "c:stat -c %U:%G /etc/kubernetes/manifests/kube-scheduler.yaml -> r:^root:root$"
+
+  - id: 10106
+    title: "Ensure that the etcd pod specification file permissions are set to 600 or more restrictive"
+    description: "The etcd pod specification file should have restrictive permissions."
+    rationale: "etcd is a highly-available key value store used as the backing store for all cluster data. Protecting its configuration is critical."
+    remediation: "Run chmod 600 /etc/kubernetes/manifests/etcd.yaml"
+    compliance:
+      - cis: ["1.1.7"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "c:stat -c %a /etc/kubernetes/manifests/etcd.yaml -> r:^600$|^400$|^000$"
+
+  - id: 10107
+    title: "Ensure that the etcd pod specification file ownership is set to root:root"
+    description: "The etcd pod specification file should be owned by root:root."
+    rationale: "Ensures only the superuser can modify the etcd configuration."
+    remediation: "Run chown root:root /etc/kubernetes/manifests/etcd.yaml"
+    compliance:
+      - cis: ["1.1.8"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "c:stat -c %U:%G /etc/kubernetes/manifests/etcd.yaml -> r:^root:root$"
+
+  # ==========================================
+  # 4 - Worker Nodes
+  # ==========================================
+
+  # 4.1 Worker Node Configuration Files
+  - id: 10400
+    title: "Ensure that the kubelet service file permissions are set to 600 or more restrictive"
+    description: "The kubelet service file should have restrictive permissions."
+    rationale: "The kubelet service file controls the kubelet daemon. Restricting permissions protects against unauthorized changes."
+    remediation: "Run chmod 600 /etc/systemd/system/kubelet.service.d/10-kubeadm.conf or the relevant kubelet service file."
+    compliance:
+      - cis: ["4.1.1"]
+      - cis_csc_v8: ["3.3"]
+    condition: any
+    rules:
+      - "c:stat -c %a /etc/systemd/system/kubelet.service.d/10-kubeadm.conf -> r:^600$|^400$|^000$"
+      - "c:stat -c %a /usr/lib/systemd/system/kubelet.service -> r:^600$|^400$|^644$"
+
+  - id: 10401
+    title: "Ensure that the kubelet service file ownership is set to root:root"
+    description: "The kubelet service file should be owned by root:root."
+    rationale: "Ensures only the superuser can modify the kubelet service configuration."
+    remediation: "Run chown root:root on the kubelet service file."
+    compliance:
+      - cis: ["4.1.2"]
+      - cis_csc_v8: ["3.3"]
+    condition: any
+    rules:
+      - "c:stat -c %U:%G /etc/systemd/system/kubelet.service.d/10-kubeadm.conf -> r:^root:root$"
+      - "c:stat -c %U:%G /usr/lib/systemd/system/kubelet.service -> r:^root:root$"
+
+  - id: 10402
+    title: "Ensure that the kubelet configuration file permissions are set to 600 or more restrictive"
+    description: "The kubelet configuration file should have restrictive permissions."
+    rationale: "Kubelet reads configuration from this file. Restricting access prevents unauthorized modifications."
+    remediation: "Run chmod 600 /var/lib/kubelet/config.yaml"
+    compliance:
+      - cis: ["4.1.5"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "c:stat -c %a /var/lib/kubelet/config.yaml -> r:^600$|^400$|^000$"
+
+  - id: 10403
+    title: "Ensure that the kubelet configuration file ownership is set to root:root"
+    description: "The kubelet configuration file should be owned by root:root."
+    rationale: "Ensures only the superuser can modify the kubelet configuration."
+    remediation: "Run chown root:root /var/lib/kubelet/config.yaml"
+    compliance:
+      - cis: ["4.1.6"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "c:stat -c %U:%G /var/lib/kubelet/config.yaml -> r:^root:root$"
+
+  # 4.2 Kubelet
+  - id: 10410
+    title: "Ensure that the --anonymous-auth argument is set to false"
+    description: "Disable anonymous requests to the Kubelet server."
+    rationale: "When enabled, requests that are not rejected by other configured authentication methods are treated as anonymous. These requests should be disabled."
+    remediation: "Set --anonymous-auth=false in the kubelet configuration or kubelet service file."
+    compliance:
+      - cis: ["4.2.1"]
+      - cis_csc_v8: ["3.3"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:--anonymous-auth=false"
+      - "f:/var/lib/kubelet/config.yaml -> r:anonymous: && r:enabled: false"
+
+  - id: 10411
+    title: "Ensure that the --authorization-mode argument is not set to AlwaysAllow"
+    description: "Do not allow all requests. Ensure that the kubelet has an authorization mode other than AlwaysAllow."
+    rationale: "Kubelets by default allow all authenticated requests. This should be locked down."
+    remediation: "Set --authorization-mode=Webhook in the kubelet configuration."
+    compliance:
+      - cis: ["4.2.2"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "not c:ps -ef -> r:kubelet && r:--authorization-mode=AlwaysAllow"
+
+  - id: 10412
+    title: "Ensure that the --client-ca-file argument is set as appropriate"
+    description: "Enable kubelet authentication using certificates."
+    rationale: "This setting ensures only authenticated clients can communicate with the kubelet."
+    remediation: "Set --client-ca-file=<path/to/client-ca-file> in the kubelet service file."
+    compliance:
+      - cis: ["4.2.3"]
+      - cis_csc_v8: ["3.3"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:--client-ca-file"
+      - "f:/var/lib/kubelet/config.yaml -> r:clientCAFile:"
+
+  - id: 10413
+    title: "Ensure that the --read-only-port argument is set to 0"
+    description: "Disable the read-only port on the kubelet."
+    rationale: "The read-only port provides unauthenticated access to the kubelet. Disabling it reduces the attack surface."
+    remediation: "Set --read-only-port=0 in the kubelet configuration."
+    compliance:
+      - cis: ["4.2.4"]
+      - cis_csc_v8: ["3.3"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:--read-only-port=0"
+      - "f:/var/lib/kubelet/config.yaml -> r:readOnlyPort: 0"
+
+  - id: 10414
+    title: "Ensure that the --protect-kernel-defaults argument is set to true"
+    description: "Protect tuned kernel parameters from overriding kubelet default kernel parameter values."
+    rationale: "Kernel parameters are usually tuned and hardened by the system administrators. These parameters should be protected."
+    remediation: "Set --protect-kernel-defaults=true in the kubelet configuration."
+    compliance:
+      - cis: ["4.2.6"]
+      - cis_csc_v8: ["3.3"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:--protect-kernel-defaults=true"
+      - "f:/var/lib/kubelet/config.yaml -> r:protectKernelDefaults: true"
+
+  - id: 10415
+    title: "Ensure that the --rotate-certificates argument is not set to false"
+    description: "Enable kubelet client certificate rotation."
+    rationale: "Certificate rotation ensures that certificates are not used beyond their intended lifetime, reducing the risk of compromise."
+    remediation: "Set --rotate-certificates=true in the kubelet configuration (or remove the flag, as true is the default)."
+    compliance:
+      - cis: ["4.2.11"]
+      - cis_csc_v8: ["3.3"]
+    condition: all
+    rules:
+      - "not c:ps -ef -> r:kubelet && r:--rotate-certificates=false"
+
+  - id: 10416
+    title: "Ensure that the RotateKubeletServerCertificate argument is set to true"
+    description: "Enable kubelet server certificate rotation."
+    rationale: "Automatically rotating server certificates prevents the use of expired certificates."
+    remediation: "Set RotateKubeletServerCertificate=true in the kubelet configuration."
+    compliance:
+      - cis: ["4.2.12"]
+      - cis_csc_v8: ["3.3"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:RotateKubeletServerCertificate=true"
+      - "f:/var/lib/kubelet/config.yaml -> r:serverTLSBootstrap: true"
+
+  # ==========================================
+  # 5 - Policies
+  # ==========================================
+
+  - id: 10500
+    title: "Ensure that the cluster has at least one active network policy"
+    description: "Use network policies to restrict traffic between pods."
+    rationale: "By default, Kubernetes allows all pod-to-pod traffic. Network policies restrict this communication and reduce the attack surface."
+    remediation: "Create NetworkPolicy resources to restrict traffic flow between pods."
+    compliance:
+      - cis: ["5.3.2"]
+      - cis_csc_v8: ["3.12"]
+    condition: all
+    rules:
+      - 'c:kubectl get networkpolicy --all-namespaces -o json -> r:"items":\s*\[.+'
+
+  - id: 10501
+    title: "Ensure default ServiceAccounts are not actively used"
+    description: "The default service account should not be used to run pods. Create specific service accounts for workloads."
+    rationale: "Default service accounts may have more permissions than needed. Using dedicated service accounts follows the principle of least privilege."
+    remediation: "Create dedicated service accounts for each workload and set automountServiceAccountToken: false on default service accounts."
+    compliance:
+      - cis: ["5.1.5"]
+      - cis_csc_v8: ["3.3"]
+    condition: none
+    rules:
+      - 'c:kubectl get pods --all-namespaces -o json -> r:"serviceAccountName":\s*"default"'

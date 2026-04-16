@@ -1,0 +1,148 @@
+{{- if .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}-grafana-compliance
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+    {{ .Values.grafana.sidecarLabel }}: {{ .Values.grafana.sidecarLabelValue | quote }}
+  annotations:
+    grafana_folder: {{ .Values.grafana.folder | quote }}
+data:
+  wazuh-compliance-overview.json: |
+    {
+      "annotations": { "list": [] },
+      "editable": true,
+      "fiscalYearStartMonth": 0,
+      "graphTooltip": 1,
+      "id": null,
+      "links": [],
+      "panels": [
+        {
+          "title": "Agent Status",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+          "targets": [{
+            "expr": "count(wazuh_agent_up == 1)",
+            "legendFormat": "Agents Online"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "red", "value": 0 },
+                  { "color": "green", "value": 1 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Compliance Score",
+          "type": "gauge",
+          "gridPos": { "h": 8, "w": 6, "x": 6, "y": 0 },
+          "targets": [{
+            "expr": "sum(wazuh_sca_checks_passed) / (sum(wazuh_sca_checks_passed) + sum(wazuh_sca_checks_failed)) * 100",
+            "legendFormat": "Compliance %"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "min": 0,
+              "max": 100,
+              "unit": "percent",
+              "thresholds": {
+                "steps": [
+                  { "color": "red", "value": 0 },
+                  { "color": "orange", "value": 50 },
+                  { "color": "yellow", "value": 75 },
+                  { "color": "green", "value": 90 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "SCA Checks — Pass vs Fail by Node",
+          "type": "barchart",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "targets": [
+            { "expr": "wazuh_sca_checks_passed", "legendFormat": "{{`{{node}}`}} Passed" },
+            { "expr": "wazuh_sca_checks_failed", "legendFormat": "{{`{{node}}`}} Failed" }
+          ]
+        },
+        {
+          "title": "Vulnerabilities per Node",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+          "targets": [{
+            "expr": "wazuh_vulnerabilities_detected",
+            "legendFormat": "{{`{{node}}`}}"
+          }]
+        },
+        {
+          "title": "FIM Events Rate",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+          "targets": [{
+            "expr": "rate(wazuh_fim_events_total[5m])",
+            "legendFormat": "{{`{{node}}`}}"
+          }]
+        },
+        {
+          "title": "Alert Rate",
+          "type": "timeseries",
+          "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+          "targets": [{
+            "expr": "rate(wazuh_alerts_total[5m])",
+            "legendFormat": "{{`{{node}}`}}"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "thresholdsStyle": { "mode": "area" }
+              },
+              "thresholds": {
+                "steps": [
+                  { "color": "transparent", "value": 0 },
+                  { "color": "red", "value": 50 }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "title": "Agents Down",
+          "type": "stat",
+          "gridPos": { "h": 4, "w": 6, "x": 0, "y": 4 },
+          "targets": [{
+            "expr": "count(wazuh_agent_up == 0) or vector(0)",
+            "legendFormat": "Agents Down"
+          }],
+          "fieldConfig": {
+            "defaults": {
+              "thresholds": {
+                "steps": [
+                  { "color": "green", "value": 0 },
+                  { "color": "red", "value": 1 }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "schemaVersion": 39,
+      "tags": ["wazuh", "compliance", "security", "kubernetes"],
+      "templating": {
+        "list": [{
+          "name": "cluster",
+          "type": "query",
+          "query": "label_values(wazuh_agent_up, cluster)",
+          "refresh": 2
+        }]
+      },
+      "time": { "from": "now-24h", "to": "now" },
+      "title": "Wazuh K8s Compliance Overview",
+      "uid": "wazuh-k8s-compliance"
+    }
+{{- end }}

@@ -1,0 +1,273 @@
+policy:
+  id: "pci_dss_k8s"
+  file: "pci_dss_k8s.yml"
+  name: "PCI-DSS v4.0 — Kubernetes Technical Controls"
+  description: >-
+    Maps PCI Data Security Standard v4.0 requirements to Kubernetes
+    and host-level technical checks. Covers network segmentation,
+    access control, encryption, logging, and vulnerability management.
+  references:
+    - https://www.pcisecuritystandards.org/document_library/
+    - https://documentation.wazuh.com/current/pci-dss/
+
+requirements:
+  title: "Kubernetes or Linux host detected"
+  condition: any
+  rules:
+    - "f:/etc/kubernetes/manifests"
+    - "d:/var/lib/kubelet"
+    - "f:/etc/os-release"
+
+checks:
+  # ============================================================
+  # Requirement 1: Network Security Controls
+  # ============================================================
+
+  - id: 60100
+    title: "PCI 1.2.1: Network segmentation — NetworkPolicies in use"
+    description: "Ensure Kubernetes NetworkPolicy resources restrict pod-to-pod traffic."
+    rationale: "PCI 1.2.1 requires restricting inbound and outbound traffic to that which is necessary."
+    remediation: "Create deny-all default NetworkPolicies per namespace, then allow required traffic."
+    compliance:
+      - pci_dss: ["1.2.1"]
+      - cis: ["5.3.2"]
+    condition: all
+    rules:
+      - 'c:kubectl get networkpolicy --all-namespaces -o json -> r:"items":\s*\[.+'
+
+  - id: 60101
+    title: "PCI 1.3.1: Firewall — iptables/nftables configured"
+    description: "Ensure host firewall is active on Kubernetes nodes."
+    rationale: "PCI 1.3.1 requires restricting inbound traffic to system components in the CDE."
+    remediation: "Enable and configure iptables or nftables."
+    compliance:
+      - pci_dss: ["1.3.1"]
+    condition: any
+    rules:
+      - "c:iptables -L -n -> r:Chain INPUT"
+      - "c:nft list ruleset -> r:table"
+
+  # ============================================================
+  # Requirement 2: Secure Configurations
+  # ============================================================
+
+  - id: 60200
+    title: "PCI 2.2.1: Secure defaults — kubelet anonymous auth disabled"
+    description: "Disable anonymous authentication on the kubelet."
+    rationale: "PCI 2.2.1 requires changing vendor defaults before installing on network."
+    remediation: "Set --anonymous-auth=false."
+    compliance:
+      - pci_dss: ["2.2.1"]
+      - cis: ["4.2.1"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:--anonymous-auth=false"
+      - "f:/var/lib/kubelet/config.yaml -> r:anonymous: && r:enabled: false"
+
+  - id: 60201
+    title: "PCI 2.2.4: Only necessary services — kubelet read-only port off"
+    description: "Disable unnecessary services on Kubernetes nodes."
+    rationale: "PCI 2.2.4 requires enabling only necessary services, protocols, daemons."
+    remediation: "Set --read-only-port=0."
+    compliance:
+      - pci_dss: ["2.2.4"]
+      - cis: ["4.2.4"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:--read-only-port=0"
+      - "f:/var/lib/kubelet/config.yaml -> r:readOnlyPort: 0"
+
+  # ============================================================
+  # Requirement 3: Protect Stored Account Data
+  # ============================================================
+
+  - id: 60300
+    title: "PCI 3.5.1: Encryption at rest — etcd encryption configured"
+    description: "Ensure Kubernetes secrets are encrypted at rest in etcd."
+    rationale: "PCI 3.5.1 requires protecting cryptographic keys used to protect stored account data."
+    remediation: "Configure --encryption-provider-config on the API server with aescbc or secretbox provider."
+    compliance:
+      - pci_dss: ["3.5.1"]
+      - cis: ["1.2.29"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--encryption-provider-config"
+
+  # ============================================================
+  # Requirement 4: Encrypt Transmission
+  # ============================================================
+
+  - id: 60400
+    title: "PCI 4.2.1: Secure transmission — etcd TLS enabled"
+    description: "Ensure etcd client and peer connections use TLS."
+    rationale: "PCI 4.2.1 requires strong cryptography for transmission of PAN over open networks."
+    remediation: "Configure --cert-file, --key-file, --peer-cert-file, --peer-key-file on etcd."
+    compliance:
+      - pci_dss: ["4.2.1"]
+      - cis: ["2.1", "2.4"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:etcd && r:--cert-file"
+      - "c:ps -ef -> r:etcd && r:--key-file"
+
+  - id: 60401
+    title: "PCI 4.2.1: Secure SSH — SSH protocol 2 only"
+    description: "Ensure only SSH Protocol 2 is used."
+    rationale: "PCI 4.2.1 requires strong cryptography for authentication and transmission."
+    remediation: "Ensure Protocol 1 is not configured in /etc/ssh/sshd_config."
+    compliance:
+      - pci_dss: ["4.2.1"]
+      - cis: ["5.3.4"]
+    condition: all
+    rules:
+      - "not f:/etc/ssh/sshd_config -> r:^\\s*Protocol\\s+1"
+
+  # ============================================================
+  # Requirement 6: Secure Software
+  # ============================================================
+
+  - id: 60600
+    title: "PCI 6.3.3: Vulnerability management — Security updates available"
+    description: "Check that the system is configured for automatic security updates."
+    rationale: "PCI 6.3.3 requires patching known vulnerabilities in a timely manner."
+    remediation: "Configure unattended-upgrades or yum-cron for security updates."
+    compliance:
+      - pci_dss: ["6.3.3"]
+    condition: any
+    rules:
+      - "c:dpkg -l unattended-upgrades -> r:ii"
+      - "c:rpm -q yum-cron -> r:yum-cron"
+
+  # ============================================================
+  # Requirement 7: Restrict Access
+  # ============================================================
+
+  - id: 60700
+    title: "PCI 7.1.1: Least privilege — RBAC authorization mode"
+    description: "Ensure the API server uses RBAC authorization."
+    rationale: "PCI 7.1.1 requires restricting access to system components to those individuals whose job requires such access."
+    remediation: "Ensure --authorization-mode includes RBAC."
+    compliance:
+      - pci_dss: ["7.1.1"]
+      - cis: ["1.2.7"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--authorization-mode && r:RBAC"
+
+  - id: 60701
+    title: "PCI 7.2.2: File permissions — /etc/passwd permissions"
+    description: "Ensure critical system file permissions are correct."
+    rationale: "PCI 7.2.2 requires access control systems to restrict access based on a user's need to know."
+    remediation: "Run chmod 644 /etc/passwd."
+    compliance:
+      - pci_dss: ["7.2.2"]
+      - cis: ["5.1.2"]
+    condition: all
+    rules:
+      - "c:stat -c %a /etc/passwd -> r:^644$"
+
+  # ============================================================
+  # Requirement 8: Identify Users and Authenticate Access
+  # ============================================================
+
+  - id: 60800
+    title: "PCI 8.2.3: Strong authentication — SSH MaxAuthTries"
+    description: "Limit SSH authentication attempts."
+    rationale: "PCI 8.2.3 requires limiting repeated access attempts."
+    remediation: "Set MaxAuthTries 4 in /etc/ssh/sshd_config."
+    compliance:
+      - pci_dss: ["8.2.3"]
+      - cis: ["5.3.5"]
+    condition: all
+    rules:
+      - 'f:/etc/ssh/sshd_config -> n:^\s*MaxAuthTries\s+(\d+) compare <= 4'
+
+  - id: 60801
+    title: "PCI 8.3.6: Password complexity — Minimum length configured"
+    description: "Ensure password minimum length is enforced."
+    rationale: "PCI 8.3.6 requires passwords with minimum of 12 characters."
+    remediation: "Configure pam_pwquality.so with minlen=12."
+    compliance:
+      - pci_dss: ["8.3.6"]
+    condition: any
+    rules:
+      - "f:/etc/security/pwquality.conf -> r:^minlen"
+      - "f:/etc/pam.d/common-password -> r:pam_pwquality.so"
+
+  - id: 60802
+    title: "PCI 8.3.9: Password expiration — PASS_MAX_DAYS configured"
+    description: "Ensure password expiration is set to 90 days or less."
+    rationale: "PCI 8.3.9 requires passwords to be changed at least every 90 days."
+    remediation: "Set PASS_MAX_DAYS 90 in /etc/login.defs."
+    compliance:
+      - pci_dss: ["8.3.9"]
+    condition: all
+    rules:
+      - 'f:/etc/login.defs -> n:PASS_MAX_DAYS\s+(\d+) compare <= 90'
+
+  # ============================================================
+  # Requirement 10: Log and Monitor
+  # ============================================================
+
+  - id: 61000
+    title: "PCI 10.2.1: Audit trail — auditd running"
+    description: "Ensure auditd is installed and running."
+    rationale: "PCI 10.2.1 requires audit trails for individual access to cardholder data."
+    remediation: "Install and enable auditd."
+    compliance:
+      - pci_dss: ["10.2.1"]
+      - cis: ["4.1.1.2"]
+    condition: all
+    rules:
+      - "c:systemctl is-enabled auditd -> r:enabled"
+
+  - id: 61001
+    title: "PCI 10.2.2: Audit trail — K8s API audit logging"
+    description: "Ensure Kubernetes API server audit logging is configured."
+    rationale: "PCI 10.2.2 requires audit logs for actions by individuals with root/admin privileges."
+    remediation: "Set --audit-log-path on the API server."
+    compliance:
+      - pci_dss: ["10.2.2"]
+      - cis: ["1.2.18"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-path"
+
+  - id: 61002
+    title: "PCI 10.3.1: Audit log retention — Logs retained 12 months"
+    description: "Ensure K8s audit log retention is configured."
+    rationale: "PCI 10.3.1 requires retention of audit log history for at least 12 months."
+    remediation: "Set --audit-log-maxage=365 on the API server."
+    compliance:
+      - pci_dss: ["10.3.1"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-maxage"
+
+  - id: 61003
+    title: "PCI 10.6.1: Time sync — NTP configured"
+    description: "Ensure time-synchronization technology is in use."
+    rationale: "PCI 10.6.1 requires synchronizing clocks and times of all critical systems."
+    remediation: "Configure chrony or ntpd for time synchronization."
+    compliance:
+      - pci_dss: ["10.6.1"]
+    condition: any
+    rules:
+      - "c:systemctl is-active chronyd -> r:active"
+      - "c:systemctl is-active ntpd -> r:active"
+      - "c:systemctl is-active systemd-timesyncd -> r:active"
+
+  # ============================================================
+  # Requirement 11: Test Security
+  # ============================================================
+
+  - id: 61100
+    title: "PCI 11.5.1: File integrity monitoring — FIM active"
+    description: "Ensure file integrity monitoring detects changes to critical files."
+    rationale: "PCI 11.5.1 requires change-detection mechanisms to alert on unauthorized modifications."
+    remediation: "Ensure Wazuh FIM (syscheck) is enabled in ossec.conf."
+    compliance:
+      - pci_dss: ["11.5.1"]
+    condition: all
+    rules:
+      - "f:/var/ossec/etc/ossec.conf -> r:<syscheck> && !r:<disabled>yes"

@@ -1,0 +1,31 @@
+{{- if and .Values.metrics.enabled .Values.metrics.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}
+  namespace: {{ default .Release.Namespace .Values.metrics.serviceMonitor.namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+    {{- with .Values.metrics.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "wazuh-k8s-hardening.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: metrics
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      path: {{ .Values.metrics.path }}
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      scrapeTimeout: {{ .Values.metrics.serviceMonitor.scrapeTimeout }}
+      honorLabels: true
+      metricRelabelings:
+        - sourceLabels: [__name__]
+          regex: "wazuh_.*"
+          action: keep
+{{- end }}

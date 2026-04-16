@@ -1,0 +1,105 @@
+╔══════════════════════════════════════════════════════════════════╗
+║         Wazuh K8s Hardening — Enterprise Compliance Suite       ║
+╚══════════════════════════════════════════════════════════════════╝
+
+  Cluster:     {{ .Values.global.clusterName }}
+  Environment: {{ .Values.global.environment }}
+  Manager:     {{ .Values.manager.host }}:{{ .Values.manager.port }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  COMPLIANCE FRAMEWORKS
+  {{- if .Values.compliance.cisKubernetes.enabled }}
+  ✓ CIS Kubernetes Benchmark v1.8.0 ({{ .Values.compliance.cisKubernetes.profile }})
+  {{- end }}
+  {{- if .Values.compliance.cisLinux.enabled }}
+  ✓ CIS Linux Benchmark v2.0.0 ({{ .Values.compliance.cisLinux.profile }})
+  {{- end }}
+  {{- if .Values.compliance.nist80053.enabled }}
+  ✓ NIST 800-53 Rev5 Technical Controls
+  {{- end }}
+  {{- if .Values.compliance.pciDss.enabled }}
+  ✓ PCI-DSS v4.0
+  {{- end }}
+  {{- if .Values.compliance.hipaa.enabled }}
+  ✓ HIPAA Security Rule §164.312
+  {{- end }}
+  {{- if .Values.compliance.soc2.enabled }}
+  ✓ SOC2 Type II Trust Services Criteria
+  {{- end }}
+
+  SECURITY MODULES
+  {{- if .Values.sca.enabled }}
+  ✓ Security Configuration Assessment (SCA)
+  {{- end }}
+  {{- if .Values.compliance.runtimeThreatDetection.enabled }}
+  ✓ Runtime Threat Detection (MITRE ATT&CK mapped)
+  {{- end }}
+  {{- if .Values.vulnerabilityDetector.enabled }}
+  ✓ Vulnerability Detection
+  {{- end }}
+  {{- if .Values.fim.enabled }}
+  ✓ File Integrity Monitoring (FIM{{ if .Values.fim.whoData }} + Who-Data{{ end }})
+  {{- end }}
+  {{- if .Values.logCollector.enabled }}
+  ✓ Log Collection
+  {{- end }}
+
+  ENTERPRISE FEATURES
+  {{- if .Values.admissionWebhook.enabled }}
+  ✓ Admission Webhook (policy: {{ .Values.admissionWebhook.failurePolicy }})
+  {{- else }}
+  ○ Admission Webhook (disabled — enable with admissionWebhook.enabled=true)
+  {{- end }}
+  {{- if .Values.autoRemediation.enabled }}
+  ✓ Auto-Remediation ({{ if .Values.autoRemediation.dryRun }}dry-run{{ else }}LIVE{{ end }})
+  {{- else }}
+  ○ Auto-Remediation (disabled — enable with autoRemediation.enabled=true)
+  {{- end }}
+  {{- if .Values.complianceReport.enabled }}
+  ✓ Compliance Reporting ({{ .Values.complianceReport.schedule }})
+  {{- else }}
+  ○ Compliance Reporting (disabled)
+  {{- end }}
+  {{- if .Values.metrics.enabled }}
+  ✓ Prometheus Metrics (:{{ .Values.metrics.port }}{{ .Values.metrics.path }})
+  {{- end }}
+  {{- if .Values.grafana.enabled }}
+  ✓ Grafana Dashboards
+  {{- end }}
+  {{- if .Values.networkPolicy.enabled }}
+  ✓ Network Policy Enforcement
+  {{- end }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  COMMANDS
+
+  Check agent status:
+    kubectl get pods -n {{ .Release.Namespace }} -l "{{ include "wazuh-k8s-hardening.selectorLabels" . | replace "\n" "," }}"
+
+  View agent logs:
+    kubectl logs -n {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "wazuh-k8s-hardening.name" . }}" -c wazuh-agent -f
+
+  Run Helm tests:
+    helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
+
+  {{- if .Values.metrics.enabled }}
+  View metrics:
+    kubectl port-forward -n {{ .Release.Namespace }} ds/{{ include "wazuh-k8s-hardening.fullname" . }} {{ .Values.metrics.port }}:{{ .Values.metrics.port }}
+    curl http://localhost:{{ .Values.metrics.port }}{{ .Values.metrics.path }}
+  {{- end }}
+
+{{- if not (or .Values.manager.existingSecret .Values.manager.registrationPassword) }}
+
+  ⚠ WARNING: No registration password configured!
+  Agents may fail to register. Set manager.registrationPassword
+  or manager.existingSecret in your values.
+{{- end }}
+
+{{- if and .Values.autoRemediation.enabled (not .Values.autoRemediation.dryRun) }}
+
+  ⚠ WARNING: Auto-remediation is in LIVE mode!
+  It will make changes to node configurations. Set
+  autoRemediation.dryRun=true for safe operation.
+{{- end }}

@@ -1,0 +1,177 @@
+policy:
+  id: "cis_kubernetes_l2"
+  file: "cis_kubernetes_l2.yml"
+  name: "CIS Kubernetes Benchmark v1.8.0 - Level 2"
+  description: "This policy includes all Level 1 checks plus additional Level 2 controls for environments requiring stronger security posture."
+  references:
+    - https://www.cisecurity.org/benchmark/kubernetes
+    - https://documentation.wazuh.com/current/user-manual/capabilities/sec-config-assessment/
+
+requirements:
+  title: "Check Kubernetes is installed"
+  description: "Requirements for running the CIS Kubernetes Benchmark checks."
+  condition: any
+  rules:
+    - "f:/etc/kubernetes/manifests"
+    - "f:/etc/kubernetes/kubelet.conf"
+    - "d:/var/lib/kubelet"
+    - "p:kubelet"
+
+checks:
+  # ==========================================
+  # Level 2 - API Server
+  # ==========================================
+
+  - id: 20100
+    title: "Ensure that the --audit-log-path argument is set"
+    description: "Enable auditing on the Kubernetes API server and set the desired audit log path."
+    rationale: "Auditing the API server provides a security-relevant chronological set of records documenting the sequence of activities."
+    remediation: "Edit the API server manifest and set --audit-log-path=<path>."
+    compliance:
+      - cis: ["1.2.18"]
+      - cis_csc_v8: ["8.2"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-path"
+
+  - id: 20101
+    title: "Ensure that the --audit-log-maxage argument is set to 30 or as appropriate"
+    description: "Retain the logs for at least 30 days or as appropriate."
+    rationale: "Retaining logs for at least 30 days ensures that you can review past activities if needed."
+    remediation: "Edit the API server manifest and set --audit-log-maxage=30."
+    compliance:
+      - cis: ["1.2.19"]
+      - cis_csc_v8: ["8.2"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-maxage"
+
+  - id: 20102
+    title: "Ensure that the --audit-log-maxbackup argument is set to 10 or as appropriate"
+    description: "Retain 10 or an appropriate number of old log files."
+    rationale: "Ensures log rotation with sufficient backup copies for investigation."
+    remediation: "Edit the API server manifest and set --audit-log-maxbackup=10."
+    compliance:
+      - cis: ["1.2.20"]
+      - cis_csc_v8: ["8.2"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-maxbackup"
+
+  - id: 20103
+    title: "Ensure that the --audit-log-maxsize argument is set to 100 or as appropriate"
+    description: "Rotate log files on reaching 100 MB or an appropriate size."
+    rationale: "Prevents the audit log from consuming excessive disk space."
+    remediation: "Edit the API server manifest and set --audit-log-maxsize=100."
+    compliance:
+      - cis: ["1.2.21"]
+      - cis_csc_v8: ["8.2"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-maxsize"
+
+  - id: 20104
+    title: "Ensure that the --encryption-provider-config argument is set as appropriate"
+    description: "Encrypt etcd data at rest."
+    rationale: "etcd is a highly-available key value store. Encrypting its data at rest provides an additional layer of defense."
+    remediation: "Create an EncryptionConfiguration resource and set --encryption-provider-config on the API server."
+    compliance:
+      - cis: ["1.2.29"]
+      - cis_csc_v8: ["3.11"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--encryption-provider-config"
+
+  # ==========================================
+  # Level 2 - etcd
+  # ==========================================
+
+  - id: 20200
+    title: "Ensure that the --cert-file and --key-file arguments are set as appropriate for etcd"
+    description: "Configure TLS encryption for the etcd server."
+    rationale: "etcd is a highly-available key value store. Protecting this data is critical."
+    remediation: "Set --cert-file=<path> and --key-file=<path> for the etcd service."
+    compliance:
+      - cis: ["2.1"]
+      - cis_csc_v8: ["3.10"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:etcd && r:--cert-file"
+      - "c:ps -ef -> r:etcd && r:--key-file"
+
+  - id: 20201
+    title: "Ensure that the --client-cert-auth argument is set to true for etcd"
+    description: "Enable client certificate authentication for the etcd service."
+    rationale: "Client certificate authentication ensures only authenticated clients can access etcd."
+    remediation: "Set --client-cert-auth=true for the etcd service."
+    compliance:
+      - cis: ["2.2"]
+      - cis_csc_v8: ["3.10"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:etcd && r:--client-cert-auth=true"
+
+  - id: 20202
+    title: "Ensure that the --peer-cert-file and --peer-key-file arguments are set as appropriate for etcd"
+    description: "Configure peer TLS encryption for the etcd cluster."
+    rationale: "etcd cluster members should communicate over encrypted channels."
+    remediation: "Set --peer-cert-file and --peer-key-file for the etcd service."
+    compliance:
+      - cis: ["2.4"]
+      - cis_csc_v8: ["3.10"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:etcd && r:--peer-cert-file"
+      - "c:ps -ef -> r:etcd && r:--peer-key-file"
+
+  # ==========================================
+  # Level 2 - Pod Security
+  # ==========================================
+
+  - id: 20500
+    title: "Minimize the admission of containers wishing to share the host process ID namespace"
+    description: "Do not allow containers to share the host's process ID namespace."
+    rationale: "Sharing the host PID namespace allows container processes to view all processes on the host, which is a security risk."
+    remediation: "Create a Pod Security admission configuration that restricts hostPID."
+    compliance:
+      - cis: ["5.2.2"]
+      - cis_csc_v8: ["3.3"]
+    condition: none
+    rules:
+      - 'c:kubectl get pods --all-namespaces -o json -> r:"hostPID":\s*true'
+
+  - id: 20501
+    title: "Minimize the admission of containers wishing to share the host network namespace"
+    description: "Do not allow containers to share the host's network namespace."
+    rationale: "Sharing the host network gives the container access to all network interfaces and listening services on the host."
+    remediation: "Create a Pod Security admission configuration that restricts hostNetwork."
+    compliance:
+      - cis: ["5.2.4"]
+      - cis_csc_v8: ["3.3"]
+    condition: none
+    rules:
+      - 'c:kubectl get pods --all-namespaces -o json -> r:"hostNetwork":\s*true'
+
+  - id: 20502
+    title: "Minimize the admission of containers with allowPrivilegeEscalation"
+    description: "Do not allow containers to escalate privileges."
+    rationale: "A container running with allowPrivilegeEscalation can gain more privileges than its parent process."
+    remediation: "Set allowPrivilegeEscalation to false in all pod security contexts."
+    compliance:
+      - cis: ["5.2.5"]
+      - cis_csc_v8: ["3.3"]
+    condition: none
+    rules:
+      - 'c:kubectl get pods --all-namespaces -o json -> r:"allowPrivilegeEscalation":\s*true'
+
+  - id: 20503
+    title: "Minimize the admission of root containers"
+    description: "Do not allow containers to run as root."
+    rationale: "Containers should run as a non-root user to limit the impact of a container compromise."
+    remediation: "Set runAsNonRoot to true in pod security contexts."
+    compliance:
+      - cis: ["5.2.6"]
+      - cis_csc_v8: ["3.3"]
+    condition: none
+    rules:
+      - 'c:kubectl get pods --all-namespaces -o json -> !r:"runAsNonRoot":\s*true'

@@ -1,0 +1,97 @@
+{{- if .Values.complianceReport.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}-compliance-report
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+    app.kubernetes.io/component: compliance-report
+spec:
+  schedule: {{ .Values.complianceReport.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 5
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            {{- include "wazuh-k8s-hardening.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: compliance-report
+        spec:
+          serviceAccountName: {{ include "wazuh-k8s-hardening.serviceAccountName" . }}
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            fsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: report-generator
+              image: {{ include "wazuh-k8s-hardening.image" . }}
+              command:
+                - /bin/sh
+                - /scripts/compliance-report.sh
+              env:
+                - name: WAZUH_MANAGER
+                  value: {{ .Values.manager.host | quote }}
+                - name: CLUSTER_NAME
+                  value: {{ .Values.global.clusterName | quote }}
+                - name: ENVIRONMENT
+                  value: {{ .Values.global.environment | quote }}
+                - name: ORGANIZATION
+                  value: {{ .Values.global.organization | quote }}
+                - name: OUTPUT_JSON
+                  value: {{ .Values.complianceReport.formats.json | quote }}
+                - name: OUTPUT_HTML
+                  value: {{ .Values.complianceReport.formats.html | quote }}
+                - name: OUTPUT_CSV
+                  value: {{ .Values.complianceReport.formats.csv | quote }}
+                {{- if .Values.complianceReport.s3Upload.enabled }}
+                - name: S3_BUCKET
+                  value: {{ .Values.complianceReport.s3Upload.bucket | quote }}
+                - name: S3_REGION
+                  value: {{ .Values.complianceReport.s3Upload.region | quote }}
+                - name: S3_PREFIX
+                  value: {{ .Values.complianceReport.s3Upload.prefix | quote }}
+                {{- if .Values.complianceReport.s3Upload.existingSecret }}
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.complianceReport.s3Upload.existingSecret }}
+                      key: aws-access-key-id
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: {{ .Values.complianceReport.s3Upload.existingSecret }}
+                      key: aws-secret-access-key
+                {{- end }}
+                {{- end }}
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: reports
+                  mountPath: /reports
+              {{- with .Values.complianceReport.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              securityContext:
+                readOnlyRootFilesystem: false
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+          volumes:
+            - name: scripts
+              configMap:
+                name: {{ include "wazuh-k8s-hardening.fullname" . }}-scripts
+                defaultMode: 0755
+            - name: reports
+              emptyDir:
+                sizeLimit: 500Mi
+{{- end }}

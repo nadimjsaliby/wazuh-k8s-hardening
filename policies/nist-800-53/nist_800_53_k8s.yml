@@ -1,0 +1,344 @@
+policy:
+  id: "nist_800_53_k8s"
+  file: "nist_800_53_k8s.yml"
+  name: "NIST 800-53 Rev5 — Kubernetes Technical Controls"
+  description: >-
+    Maps NIST 800-53 Revision 5 security controls to Kubernetes and host-level
+    technical checks. Covers Access Control (AC), Audit & Accountability (AU),
+    Configuration Management (CM), Identification & Authentication (IA),
+    System & Communications Protection (SC), and System & Information Integrity (SI).
+  references:
+    - https://csrc.nist.gov/publications/detail/sp/800-53/rev-5/final
+    - https://nvd.nist.gov/800-53
+    - https://documentation.wazuh.com/current/user-manual/capabilities/sec-config-assessment/
+
+requirements:
+  title: "Kubernetes or Linux host detected"
+  description: "This policy requires a Kubernetes node or Linux host."
+  condition: any
+  rules:
+    - "f:/etc/kubernetes/manifests"
+    - "d:/var/lib/kubelet"
+    - "f:/etc/os-release"
+
+checks:
+  # ============================================================
+  # AC — Access Control
+  # ============================================================
+
+  - id: 50100
+    title: "AC-2(1): Automated Account Management — No shared ServiceAccounts"
+    description: "Ensure pods do not use the default service account, enforcing dedicated accounts per workload."
+    rationale: "NIST AC-2(1) requires automated mechanisms to support account management. Shared accounts defeat accountability."
+    remediation: "Create dedicated ServiceAccounts for each workload. Set automountServiceAccountToken: false on default accounts."
+    compliance:
+      - nist_800_53: ["AC-2(1)"]
+      - cis: ["5.1.5"]
+    condition: none
+    rules:
+      - 'c:kubectl get pods --all-namespaces -o json -> r:"serviceAccountName":\s*"default"'
+
+  - id: 50101
+    title: "AC-3: Access Enforcement — RBAC enabled on API server"
+    description: "Ensure the Kubernetes API server has RBAC authorization mode enabled."
+    rationale: "NIST AC-3 requires enforced access control policies. RBAC is the standard K8s mechanism."
+    remediation: "Ensure --authorization-mode includes RBAC in API server arguments."
+    compliance:
+      - nist_800_53: ["AC-3"]
+      - cis: ["1.2.7"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--authorization-mode && r:RBAC"
+
+  - id: 50102
+    title: "AC-6: Least Privilege — No wildcard RBAC rules"
+    description: "Ensure ClusterRoles and Roles do not use wildcard (*) verbs or resources."
+    rationale: "NIST AC-6 mandates least privilege. Wildcard permissions grant excessive access."
+    remediation: "Review and restrict RBAC roles to specific resources and verbs."
+    compliance:
+      - nist_800_53: ["AC-6"]
+    condition: none
+    rules:
+      - 'c:kubectl get clusterroles -o json -> r:"verbs":\s*\["\\*"\]'
+
+  - id: 50103
+    title: "AC-6(9): Log Privileged Actions — Audit logging enabled"
+    description: "Verify API server audit logging is configured."
+    rationale: "NIST AC-6(9) requires logging of privileged function execution."
+    remediation: "Configure --audit-log-path and --audit-policy-file on the API server."
+    compliance:
+      - nist_800_53: ["AC-6(9)"]
+      - cis: ["1.2.18"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-path"
+
+  - id: 50104
+    title: "AC-17: Remote Access — SSH root login disabled"
+    description: "Ensure direct root login over SSH is disabled on nodes."
+    rationale: "NIST AC-17 governs remote access security. Root SSH access bypasses accountability."
+    remediation: "Set PermitRootLogin no in /etc/ssh/sshd_config."
+    compliance:
+      - nist_800_53: ["AC-17"]
+      - cis: ["5.3.10"]
+    condition: all
+    rules:
+      - 'f:/etc/ssh/sshd_config -> r:^\s*PermitRootLogin\s+no'
+
+  # ============================================================
+  # AU — Audit and Accountability
+  # ============================================================
+
+  - id: 50200
+    title: "AU-2: Audit Events — auditd service running"
+    description: "Ensure the auditd service is installed and running."
+    rationale: "NIST AU-2 requires the system to generate audit records for defined events."
+    remediation: "Install and enable auditd: systemctl enable auditd && systemctl start auditd."
+    compliance:
+      - nist_800_53: ["AU-2"]
+      - cis: ["4.1.1.2"]
+    condition: all
+    rules:
+      - "c:systemctl is-enabled auditd -> r:enabled"
+
+  - id: 50201
+    title: "AU-3: Content of Audit Records — K8s audit log max age configured"
+    description: "Ensure API server audit logs are retained for adequate time."
+    rationale: "NIST AU-3 requires audit records with sufficient detail for after-the-fact investigation."
+    remediation: "Set --audit-log-maxage=30 on the API server."
+    compliance:
+      - nist_800_53: ["AU-3"]
+      - cis: ["1.2.19"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-maxage"
+
+  - id: 50202
+    title: "AU-4: Audit Log Storage — Log rotation configured"
+    description: "Ensure audit log size and backup limits are configured."
+    rationale: "NIST AU-4 requires allocated audit record storage capacity."
+    remediation: "Set --audit-log-maxsize and --audit-log-maxbackup on the API server."
+    compliance:
+      - nist_800_53: ["AU-4"]
+      - cis: ["1.2.20", "1.2.21"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-maxsize"
+      - "c:ps -ef -> r:kube-apiserver && r:--audit-log-maxbackup"
+
+  - id: 50203
+    title: "AU-8: Time Stamps — NTP synchronization active"
+    description: "Ensure system time is synchronized via NTP or chrony."
+    rationale: "NIST AU-8 requires internal clocks to use UTC and sync with authoritative sources."
+    remediation: "Install and enable chrony or ntpd."
+    compliance:
+      - nist_800_53: ["AU-8"]
+    condition: any
+    rules:
+      - "c:systemctl is-active chronyd -> r:active"
+      - "c:systemctl is-active ntpd -> r:active"
+      - "c:systemctl is-active systemd-timesyncd -> r:active"
+
+  # ============================================================
+  # CM — Configuration Management
+  # ============================================================
+
+  - id: 50300
+    title: "CM-2: Baseline Configuration — kubelet config file exists with proper permissions"
+    description: "Ensure the kubelet configuration file exists and has restrictive permissions."
+    rationale: "NIST CM-2 requires documented, maintained baseline configurations."
+    remediation: "Ensure /var/lib/kubelet/config.yaml exists with permissions 600."
+    compliance:
+      - nist_800_53: ["CM-2"]
+      - cis: ["4.1.5"]
+    condition: all
+    rules:
+      - "f:/var/lib/kubelet/config.yaml"
+      - "c:stat -c %a /var/lib/kubelet/config.yaml -> r:^600$|^400$"
+
+  - id: 50301
+    title: "CM-5: Access Restrictions for Change — etcd encryption at rest"
+    description: "Ensure etcd data is encrypted at rest via API server encryption provider."
+    rationale: "NIST CM-5 restricts and monitors configuration changes. Encryption protects stored cluster state."
+    remediation: "Configure --encryption-provider-config on the API server."
+    compliance:
+      - nist_800_53: ["CM-5"]
+      - cis: ["1.2.29"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:kube-apiserver && r:--encryption-provider-config"
+
+  - id: 50302
+    title: "CM-6: Configuration Settings — Unused kernel modules disabled"
+    description: "Ensure unnecessary kernel modules (cramfs, squashfs, udf) are disabled."
+    rationale: "NIST CM-6 requires configuring systems to most restrictive mode. Unused modules expand attack surface."
+    remediation: "Add 'install <module> /bin/true' to /etc/modprobe.d/."
+    compliance:
+      - nist_800_53: ["CM-6"]
+      - cis: ["1.1.1.1", "1.1.1.2", "1.1.1.3"]
+    condition: all
+    rules:
+      - "c:modprobe -n -v cramfs -> r:install /bin/true|install /bin/false"
+      - "not c:lsmod -> r:cramfs"
+
+  - id: 50303
+    title: "CM-7: Least Functionality — kubelet read-only port disabled"
+    description: "Ensure the kubelet read-only port is disabled to reduce attack surface."
+    rationale: "NIST CM-7 requires restricting system functionality to the minimum needed."
+    remediation: "Set --read-only-port=0 in the kubelet configuration."
+    compliance:
+      - nist_800_53: ["CM-7"]
+      - cis: ["4.2.4"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:--read-only-port=0"
+      - "f:/var/lib/kubelet/config.yaml -> r:readOnlyPort: 0"
+
+  # ============================================================
+  # IA — Identification and Authentication
+  # ============================================================
+
+  - id: 50400
+    title: "IA-2: Identification and Authentication — kubelet anonymous auth disabled"
+    description: "Disable anonymous authentication to the kubelet."
+    rationale: "NIST IA-2 requires uniquely identifying and authenticating users. Anonymous access undermines this."
+    remediation: "Set --anonymous-auth=false in kubelet configuration."
+    compliance:
+      - nist_800_53: ["IA-2"]
+      - cis: ["4.2.1"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:--anonymous-auth=false"
+      - "f:/var/lib/kubelet/config.yaml -> r:anonymous: && r:enabled: false"
+
+  - id: 50401
+    title: "IA-5: Authenticator Management — Password expiration configured"
+    description: "Ensure password maximum age is set to 365 days or less."
+    rationale: "NIST IA-5 governs authenticator lifecycle management."
+    remediation: "Set PASS_MAX_DAYS 365 in /etc/login.defs."
+    compliance:
+      - nist_800_53: ["IA-5"]
+      - cis: ["5.5.1.1"]
+    condition: all
+    rules:
+      - 'f:/etc/login.defs -> n:PASS_MAX_DAYS\s+(\d+) compare <= 365'
+
+  - id: 50402
+    title: "IA-5(1): Password-Based Authentication — Password complexity enforced"
+    description: "Ensure password creation requirements are configured."
+    rationale: "NIST IA-5(1) requires enforcing password complexity."
+    remediation: "Configure pam_pwquality.so with minlen=14."
+    compliance:
+      - nist_800_53: ["IA-5(1)"]
+      - cis: ["5.4.1"]
+    condition: any
+    rules:
+      - "f:/etc/security/pwquality.conf -> r:^minlen"
+      - "f:/etc/pam.d/common-password -> r:pam_pwquality.so"
+      - "f:/etc/pam.d/system-auth -> r:pam_pwquality.so"
+
+  # ============================================================
+  # SC — System and Communications Protection
+  # ============================================================
+
+  - id: 50500
+    title: "SC-7: Boundary Protection — NetworkPolicies deployed"
+    description: "Ensure Kubernetes network policies exist to segment pod traffic."
+    rationale: "NIST SC-7 requires monitoring and controlling communications at boundaries."
+    remediation: "Create NetworkPolicy resources for each namespace."
+    compliance:
+      - nist_800_53: ["SC-7"]
+      - cis: ["5.3.2"]
+    condition: all
+    rules:
+      - 'c:kubectl get networkpolicy --all-namespaces -o json -> r:"items":\s*\[.+'
+
+  - id: 50501
+    title: "SC-8: Transmission Confidentiality — etcd peer TLS configured"
+    description: "Ensure etcd peer communication uses TLS encryption."
+    rationale: "NIST SC-8 requires protecting the confidentiality of transmitted information."
+    remediation: "Configure --peer-cert-file and --peer-key-file for the etcd service."
+    compliance:
+      - nist_800_53: ["SC-8"]
+      - cis: ["2.4"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:etcd && r:--peer-cert-file"
+      - "c:ps -ef -> r:etcd && r:--peer-key-file"
+
+  - id: 50502
+    title: "SC-12: Cryptographic Key Management — kubelet certificate rotation enabled"
+    description: "Ensure kubelet client and server certificates auto-rotate."
+    rationale: "NIST SC-12 requires establishing and managing cryptographic keys."
+    remediation: "Ensure --rotate-certificates is not set to false. Enable RotateKubeletServerCertificate."
+    compliance:
+      - nist_800_53: ["SC-12"]
+      - cis: ["4.2.11", "4.2.12"]
+    condition: all
+    rules:
+      - "not c:ps -ef -> r:kubelet && r:--rotate-certificates=false"
+
+  - id: 50503
+    title: "SC-28: Protection of Information at Rest — etcd TLS configured"
+    description: "Ensure etcd uses TLS for client connections."
+    rationale: "NIST SC-28 requires protecting the confidentiality of information at rest."
+    remediation: "Set --cert-file and --key-file for the etcd service."
+    compliance:
+      - nist_800_53: ["SC-28"]
+      - cis: ["2.1"]
+    condition: all
+    rules:
+      - "c:ps -ef -> r:etcd && r:--cert-file"
+      - "c:ps -ef -> r:etcd && r:--key-file"
+
+  # ============================================================
+  # SI — System and Information Integrity
+  # ============================================================
+
+  - id: 50600
+    title: "SI-2: Flaw Remediation — Package manager security updates"
+    description: "Check that unattended-upgrades or yum-cron is configured for security updates."
+    rationale: "NIST SI-2 requires identifying, reporting, and correcting system flaws."
+    remediation: "Install and configure unattended-upgrades (Debian/Ubuntu) or yum-cron (RHEL/CentOS)."
+    compliance:
+      - nist_800_53: ["SI-2"]
+    condition: any
+    rules:
+      - "c:dpkg -l unattended-upgrades -> r:ii"
+      - "c:rpm -q yum-cron -> r:yum-cron"
+      - "c:systemctl is-enabled dnf-automatic.timer -> r:enabled"
+
+  - id: 50601
+    title: "SI-3: Malicious Code Protection — Rootcheck enabled"
+    description: "Verify Wazuh rootcheck is not disabled."
+    rationale: "NIST SI-3 requires malicious code protection mechanisms at entry/exit points."
+    remediation: "Ensure rootcheck is enabled in ossec.conf."
+    compliance:
+      - nist_800_53: ["SI-3"]
+    condition: all
+    rules:
+      - "f:/var/ossec/etc/ossec.conf -> r:<rootcheck> && !r:<disabled>yes"
+
+  - id: 50602
+    title: "SI-4: System Monitoring — Wazuh FIM active"
+    description: "Verify file integrity monitoring is operational."
+    rationale: "NIST SI-4 requires monitoring the system for attacks and unauthorized connections."
+    remediation: "Ensure syscheck is not disabled in ossec.conf."
+    compliance:
+      - nist_800_53: ["SI-4"]
+    condition: all
+    rules:
+      - "f:/var/ossec/etc/ossec.conf -> r:<syscheck> && !r:<disabled>yes"
+
+  - id: 50603
+    title: "SI-7: Software Integrity — Protect kernel defaults"
+    description: "Ensure kubelet protects tuned kernel parameters."
+    rationale: "NIST SI-7 requires detecting unauthorized changes to software and information."
+    remediation: "Set --protect-kernel-defaults=true in kubelet configuration."
+    compliance:
+      - nist_800_53: ["SI-7"]
+      - cis: ["4.2.6"]
+    condition: any
+    rules:
+      - "c:ps -ef -> r:kubelet && r:--protect-kernel-defaults=true"
+      - "f:/var/lib/kubelet/config.yaml -> r:protectKernelDefaults: true"

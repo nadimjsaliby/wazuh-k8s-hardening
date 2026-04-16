@@ -1,0 +1,108 @@
+{{- if .Values.rbac.create -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+rules:
+  # Core API — pods, nodes, services, configmaps, secrets metadata
+  - apiGroups: [""]
+    resources:
+      - pods
+      - pods/log
+      - nodes
+      - nodes/proxy
+      - namespaces
+      - services
+      - configmaps
+      - serviceaccounts
+      - endpoints
+      - persistentvolumeclaims
+      - persistentvolumes
+      - events
+      - limitranges
+      - resourcequotas
+      - replicationcontrollers
+    verbs: ["get", "list", "watch"]
+  # Apps API
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - daemonsets
+      - statefulsets
+      - replicasets
+      - controllerrevisions
+    verbs: ["get", "list", "watch"]
+  # RBAC API
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources:
+      - clusterroles
+      - clusterrolebindings
+      - roles
+      - rolebindings
+    verbs: ["get", "list", "watch"]
+  # Networking API
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - networkpolicies
+      - ingresses
+      - ingressclasses
+    verbs: ["get", "list", "watch"]
+  # Policy API
+  - apiGroups: ["policy"]
+    resources:
+      - podsecuritypolicies
+      - poddisruptionbudgets
+    verbs: ["get", "list", "watch"]
+  # Batch API
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get", "list", "watch"]
+  # Autoscaling API
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: ["get", "list", "watch"]
+  # Admission API (for webhook auditing)
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources:
+      - validatingwebhookconfigurations
+      - mutatingwebhookconfigurations
+    verbs: ["get", "list", "watch"]
+  # Storage API
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+      - csinodes
+      - csidrivers
+    verbs: ["get", "list", "watch"]
+  # Certificates API
+  - apiGroups: ["certificates.k8s.io"]
+    resources:
+      - certificatesigningrequests
+    verbs: ["get", "list", "watch"]
+  # Node metrics (for resource compliance checks)
+  - apiGroups: ["metrics.k8s.io"]
+    resources:
+      - nodes
+      - pods
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "wazuh-k8s-hardening.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

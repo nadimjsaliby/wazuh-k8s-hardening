@@ -1,0 +1,100 @@
+{{- if .Values.autoRemediation.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}-auto-remediate
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+    app.kubernetes.io/component: auto-remediation
+spec:
+  schedule: {{ .Values.autoRemediation.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 10
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            {{- include "wazuh-k8s-hardening.selectorLabels" . | nindent 12 }}
+            app.kubernetes.io/component: auto-remediation
+          annotations:
+            seccomp.security.alpha.kubernetes.io/pod: runtime/default
+        spec:
+          serviceAccountName: {{ include "wazuh-k8s-hardening.serviceAccountName" . }}
+          restartPolicy: OnFailure
+          hostPID: true
+          hostNetwork: true
+          dnsPolicy: ClusterFirstWithHostNet
+          containers:
+            - name: remediation-engine
+              image: {{ include "wazuh-k8s-hardening.image" . }}
+              command:
+                - /bin/sh
+                - /scripts/auto-remediate.sh
+              env:
+                - name: DRY_RUN
+                  value: {{ .Values.autoRemediation.dryRun | quote }}
+                - name: NODE_NAME
+                  valueFrom:
+                    fieldRef:
+                      fieldPath: spec.nodeName
+                - name: CLUSTER_NAME
+                  value: {{ .Values.global.clusterName | quote }}
+                - name: REMEDIATE_FILE_PERMISSIONS
+                  value: {{ .Values.autoRemediation.policies.filePermissions | quote }}
+                - name: REMEDIATE_KERNEL_PARAMS
+                  value: {{ .Values.autoRemediation.policies.kernelParameters | quote }}
+                - name: REMEDIATE_SSH
+                  value: {{ .Values.autoRemediation.policies.sshHardening | quote }}
+                - name: REMEDIATE_FILESYSTEMS
+                  value: {{ .Values.autoRemediation.policies.disableUnusedFilesystems | quote }}
+                - name: REMEDIATE_AUDITD
+                  value: {{ .Values.autoRemediation.policies.auditdConfiguration | quote }}
+                {{- if .Values.autoRemediation.notifications.enabled }}
+                - name: SLACK_WEBHOOK_URL
+                  value: {{ .Values.autoRemediation.notifications.slackWebhookUrl | quote }}
+                - name: SLACK_CHANNEL
+                  value: {{ .Values.autoRemediation.notifications.slackChannel | quote }}
+                {{- end }}
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: host-etc
+                  mountPath: /host/etc
+                - name: host-modprobe
+                  mountPath: /host/etc/modprobe.d
+                - name: remediation-log
+                  mountPath: /var/log/remediation
+              {{- with .Values.autoRemediation.resources }}
+              resources:
+                {{- toYaml . | nindent 16 }}
+              {{- end }}
+              securityContext:
+                privileged: true
+                runAsUser: 0
+          volumes:
+            - name: scripts
+              configMap:
+                name: {{ include "wazuh-k8s-hardening.fullname" . }}-scripts
+                defaultMode: 0755
+            - name: host-etc
+              hostPath:
+                path: /etc
+                type: Directory
+            - name: host-modprobe
+              hostPath:
+                path: /etc/modprobe.d
+                type: DirectoryOrCreate
+            - name: remediation-log
+              emptyDir:
+                sizeLimit: 100Mi
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+{{- end }}

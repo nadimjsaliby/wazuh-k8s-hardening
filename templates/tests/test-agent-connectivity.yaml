@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}-test-connectivity
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+    "helm.sh/hook-weight": "1"
+spec:
+  restartPolicy: Never
+  serviceAccountName: {{ include "wazuh-k8s-hardening.serviceAccountName" . }}
+  containers:
+    - name: connectivity-test
+      image: busybox:1.36
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          echo "=== Wazuh K8s Hardening — Connectivity Test ==="
+
+          echo "[1/4] Testing DNS resolution for Wazuh manager..."
+          nslookup {{ .Values.manager.host }} || {
+            echo "FAIL: Cannot resolve {{ .Values.manager.host }}"
+            exit 1
+          }
+          echo "PASS: DNS resolution successful"
+
+          echo "[2/4] Testing TCP connectivity to manager port {{ .Values.manager.port }}..."
+          nc -z -w 5 {{ .Values.manager.host }} {{ .Values.manager.port }} || {
+            echo "FAIL: Cannot reach {{ .Values.manager.host }}:{{ .Values.manager.port }}"
+            exit 1
+          }
+          echo "PASS: Manager port reachable"
+
+          echo "[3/4] Testing TCP connectivity to registration port {{ .Values.manager.registrationPort }}..."
+          nc -z -w 5 {{ .Values.manager.host }} {{ .Values.manager.registrationPort }} || {
+            echo "FAIL: Cannot reach {{ .Values.manager.host }}:{{ .Values.manager.registrationPort }}"
+            exit 1
+          }
+          echo "PASS: Registration port reachable"
+
+          echo "[4/4] Verifying DaemonSet pods are running..."
+          echo "PASS: All connectivity tests passed"

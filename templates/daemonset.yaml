@@ -1,0 +1,365 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "wazuh-k8s-hardening.selectorLabels" . | nindent 6 }}
+  {{- with .Values.updateStrategy }}
+  updateStrategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  template:
+    metadata:
+      annotations:
+        checksum/ossec-config: {{ include (print $.Template.BasePath "/configmap-ossec.yaml") . | sha256sum }}
+        checksum/cis-policies: {{ include (print $.Template.BasePath "/configmap-cis-policies.yaml") . | sha256sum }}
+        kubectl.kubernetes.io/default-container: wazuh-agent
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "wazuh-k8s-hardening.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "wazuh-k8s-hardening.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.priorityClassName }}
+      priorityClassName: {{ .Values.priorityClassName }}
+      {{- end }}
+      hostPID: true
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      terminationGracePeriodSeconds: 60
+
+      {{- with .Values.initContainers }}
+      initContainers:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        # ── Main Wazuh Agent ──
+        - name: wazuh-agent
+          image: {{ include "wazuh-k8s-hardening.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: WAZUH_MANAGER
+              value: {{ .Values.manager.host | quote }}
+            - name: WAZUH_MANAGER_PORT
+              value: {{ .Values.manager.port | quote }}
+            - name: WAZUH_PROTOCOL
+              value: {{ .Values.manager.protocol | quote }}
+            - name: WAZUH_REGISTRATION_PORT
+              value: {{ .Values.manager.registrationPort | quote }}
+            {{- if .Values.manager.agentGroups }}
+            - name: WAZUH_AGENT_GROUP
+              value: {{ .Values.manager.agentGroups | quote }}
+            {{- end }}
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: CLUSTER_NAME
+              value: {{ .Values.global.clusterName | quote }}
+            - name: ENVIRONMENT
+              value: {{ .Values.global.environment | quote }}
+            {{- if or .Values.manager.existingSecret .Values.manager.registrationPassword }}
+            - name: WAZUH_REGISTRATION_PASSWORD_PATH
+              value: "/var/ossec/etc/authd.pass"
+            {{- end }}
+            {{- with .Values.extraEnvVars }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: ossec-conf
+              mountPath: /var/ossec/etc/ossec.conf
+              subPath: ossec.conf
+              readOnly: true
+            {{- if .Values.compliance.cisKubernetes.enabled }}
+            - name: cis-policies
+              mountPath: /var/ossec/etc/shared/cis-kubernetes
+              readOnly: true
+            {{- end }}
+            {{- if .Values.compliance.cisLinux.enabled }}
+            - name: cis-policies
+              mountPath: /var/ossec/etc/shared/cis-linux
+              readOnly: true
+            {{- end }}
+            {{- if .Values.compliance.nist80053.enabled }}
+            - name: cis-policies
+              mountPath: /var/ossec/etc/shared/nist-800-53
+              readOnly: true
+            {{- end }}
+            {{- if .Values.compliance.pciDss.enabled }}
+            - name: cis-policies
+              mountPath: /var/ossec/etc/shared/pci-dss
+              readOnly: true
+            {{- end }}
+            {{- if .Values.compliance.hipaa.enabled }}
+            - name: cis-policies
+              mountPath: /var/ossec/etc/shared/hipaa
+              readOnly: true
+            {{- end }}
+            {{- if .Values.compliance.soc2.enabled }}
+            - name: cis-policies
+              mountPath: /var/ossec/etc/shared/soc2
+              readOnly: true
+            {{- end }}
+            {{- if .Values.compliance.runtimeThreatDetection.enabled }}
+            - name: cis-policies
+              mountPath: /var/ossec/etc/shared/runtime
+              readOnly: true
+            {{- end }}
+            {{- if or .Values.manager.existingSecret .Values.manager.registrationPassword }}
+            - name: authd-pass
+              mountPath: /var/ossec/etc/authd.pass
+              subPath: {{ .Values.manager.existingSecretKey }}
+              readOnly: true
+            {{- end }}
+            # Host filesystem mounts for node-level scanning
+            - name: host-root
+              mountPath: /host
+              readOnly: true
+            - name: host-proc
+              mountPath: /host/proc
+              readOnly: true
+            - name: host-etc
+              mountPath: /host/etc
+              readOnly: true
+            - name: host-var-log
+              mountPath: /host/var/log
+              readOnly: true
+            - name: host-run
+              mountPath: /host/run
+              readOnly: true
+            # Persistent agent data
+            - name: wazuh-data
+              mountPath: /var/ossec/data
+            - name: wazuh-logs
+              mountPath: /var/ossec/logs
+            {{- if .Values.kubernetesAudit.enabled }}
+            - name: audit-log
+              mountPath: {{ dir .Values.kubernetesAudit.auditLogPath }}
+              readOnly: true
+            {{- end }}
+            {{- if .Values.manager.tls.enabled }}
+            - name: agent-tls
+              mountPath: /var/ossec/etc/tls
+              readOnly: true
+            {{- end }}
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - "/var/ossec/bin/wazuh-control stop && sleep 5"
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "/var/ossec/bin/wazuh-control status | grep -q 'is running'"
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "/var/ossec/bin/wazuh-control status | grep -q 'is running'"
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          startupProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - "/var/ossec/bin/wazuh-control status | grep -q 'is running'"
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 30
+
+        # ── Metrics Exporter Sidecar ──
+        {{- if .Values.metrics.enabled }}
+        - name: metrics-exporter
+          image: {{ include "wazuh-k8s-hardening.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              while true; do
+                # Collect agent metrics and expose on HTTP endpoint
+                AGENT_STATUS=$(/var/ossec/bin/wazuh-control status 2>/dev/null || echo "stopped")
+                SCA_PASS=$(grep -c "result.*passed" /var/ossec/logs/ossec.log 2>/dev/null || echo 0)
+                SCA_FAIL=$(grep -c "result.*failed" /var/ossec/logs/ossec.log 2>/dev/null || echo 0)
+                FIM_EVENTS=$(grep -c "syscheck" /var/ossec/logs/ossec.log 2>/dev/null || echo 0)
+                VULN_COUNT=$(grep -c "vulnerability" /var/ossec/logs/ossec.log 2>/dev/null || echo 0)
+                ALERTS=$(grep -c "Alert" /var/ossec/logs/alerts/alerts.json 2>/dev/null || echo 0)
+
+                cat > /tmp/metrics <<METRICS_EOF
+              # HELP wazuh_agent_up Whether the Wazuh agent is running
+              # TYPE wazuh_agent_up gauge
+              wazuh_agent_up{cluster="${CLUSTER_NAME}",node="${NODE_NAME}"} $(echo "$AGENT_STATUS" | grep -q "running" && echo 1 || echo 0)
+              # HELP wazuh_sca_checks_passed Total SCA checks passed
+              # TYPE wazuh_sca_checks_passed gauge
+              wazuh_sca_checks_passed{cluster="${CLUSTER_NAME}",node="${NODE_NAME}"} ${SCA_PASS}
+              # HELP wazuh_sca_checks_failed Total SCA checks failed
+              # TYPE wazuh_sca_checks_failed gauge
+              wazuh_sca_checks_failed{cluster="${CLUSTER_NAME}",node="${NODE_NAME}"} ${SCA_FAIL}
+              # HELP wazuh_fim_events_total Total FIM events detected
+              # TYPE wazuh_fim_events_total counter
+              wazuh_fim_events_total{cluster="${CLUSTER_NAME}",node="${NODE_NAME}"} ${FIM_EVENTS}
+              # HELP wazuh_vulnerabilities_detected Total vulnerabilities detected
+              # TYPE wazuh_vulnerabilities_detected gauge
+              wazuh_vulnerabilities_detected{cluster="${CLUSTER_NAME}",node="${NODE_NAME}"} ${VULN_COUNT}
+              # HELP wazuh_alerts_total Total alerts generated
+              # TYPE wazuh_alerts_total counter
+              wazuh_alerts_total{cluster="${CLUSTER_NAME}",node="${NODE_NAME}"} ${ALERTS}
+              METRICS_EOF
+                sleep 30
+              done &
+
+              # Simple HTTP metrics server
+              while true; do
+                echo -e "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n$(cat /tmp/metrics 2>/dev/null)" | nc -l -p {{ .Values.metrics.port }} -q 1 2>/dev/null || sleep 1
+              done
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CLUSTER_NAME
+              value: {{ .Values.global.clusterName | quote }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: wazuh-logs
+              mountPath: /var/ossec/logs
+              readOnly: true
+          resources:
+            limits:
+              cpu: 50m
+              memory: 64Mi
+            requests:
+              cpu: 10m
+              memory: 32Mi
+          securityContext:
+            readOnlyRootFilesystem: false
+            allowPrivilegeEscalation: false
+            runAsUser: 0
+        {{- end }}
+
+        {{- with .Values.sidecarContainers }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+
+      volumes:
+        - name: ossec-conf
+          configMap:
+            name: {{ include "wazuh-k8s-hardening.fullname" . }}-ossec-conf
+        - name: cis-policies
+          configMap:
+            name: {{ include "wazuh-k8s-hardening.fullname" . }}-cis-policies
+        {{- if or .Values.manager.existingSecret .Values.manager.registrationPassword }}
+        - name: authd-pass
+          secret:
+            secretName: {{ include "wazuh-k8s-hardening.secretName" . }}
+            defaultMode: 0400
+        {{- end }}
+        - name: host-root
+          hostPath:
+            path: /
+            type: Directory
+        - name: host-proc
+          hostPath:
+            path: /proc
+            type: Directory
+        - name: host-etc
+          hostPath:
+            path: /etc
+            type: Directory
+        - name: host-var-log
+          hostPath:
+            path: /var/log
+            type: Directory
+        - name: host-run
+          hostPath:
+            path: /run
+            type: Directory
+        - name: wazuh-data
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: wazuh-logs
+          emptyDir:
+            sizeLimit: 500Mi
+        {{- if .Values.kubernetesAudit.enabled }}
+        - name: audit-log
+          hostPath:
+            path: {{ dir .Values.kubernetesAudit.auditLogPath }}
+            type: DirectoryOrCreate
+        {{- end }}
+        {{- if .Values.manager.tls.enabled }}
+        - name: agent-tls
+          secret:
+            secretName: {{ include "wazuh-k8s-hardening.fullname" . }}-agent-tls
+            defaultMode: 0400
+        {{- end }}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

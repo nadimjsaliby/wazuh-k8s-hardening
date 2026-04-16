@@ -1,0 +1,80 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "wazuh-k8s-hardening.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow Prometheus to scrape metrics
+    {{- if .Values.metrics.enabled }}
+    - ports:
+        - port: {{ .Values.metrics.port }}
+          protocol: TCP
+    {{- end }}
+  egress:
+    # Allow DNS resolution
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Allow communication to Wazuh manager
+    - ports:
+        - port: {{ .Values.manager.port }}
+          protocol: TCP
+        - port: {{ .Values.manager.registrationPort }}
+          protocol: TCP
+    # Allow Kubernetes API access (for SCA checks)
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+    {{- with .Values.networkPolicy.additionalEgressRules }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+---
+{{- if .Values.admissionWebhook.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "wazuh-k8s-hardening.webhookServiceName" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.webhookLabels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "wazuh-k8s-hardening.webhookSelectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow API server to call webhook
+    - ports:
+        - port: 8443
+          protocol: TCP
+  egress:
+    # DNS
+    - ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Kubernetes API
+    - ports:
+        - port: 443
+          protocol: TCP
+        - port: 6443
+          protocol: TCP
+{{- end }}
+{{- end }}

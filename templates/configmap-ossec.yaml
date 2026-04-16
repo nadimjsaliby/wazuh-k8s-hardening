@@ -1,0 +1,226 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}-ossec-conf
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+data:
+  ossec.conf: |
+    <ossec_config>
+
+      <!-- ============================================================ -->
+      <!-- Manager Connection with HA Failover                          -->
+      <!-- ============================================================ -->
+      <client>
+        <server>
+          <address>{{ .Values.manager.host }}</address>
+          <port>{{ .Values.manager.port }}</port>
+          <protocol>{{ .Values.manager.protocol }}</protocol>
+        </server>
+        {{- if .Values.manager.failover.enabled }}
+        {{- range .Values.manager.failover.hosts }}
+        <server>
+          <address>{{ .host }}</address>
+          <port>{{ default 1514 .port }}</port>
+          <protocol>{{ default "tcp" .protocol }}</protocol>
+        </server>
+        {{- end }}
+        {{- end }}
+        <enrollment>
+          <enabled>yes</enabled>
+          <manager_address>{{ .Values.manager.host }}</manager_address>
+          <port>{{ .Values.manager.registrationPort }}</port>
+          {{- if .Values.manager.agentGroups }}
+          <groups>{{ .Values.manager.agentGroups }}</groups>
+          {{- end }}
+          <agent_name>{{ .Values.agent.namePrefix }}-${HOSTNAME}</agent_name>
+          <authorization_pass_path>/var/ossec/etc/authd.pass</authorization_pass_path>
+          {{- if .Values.manager.tls.enabled }}
+          <ssl_cipher>HIGH:!ADH:!EXP:!MD5:!RC4:!3DES:!CAMELLIA:@STRENGTH</ssl_cipher>
+          {{- end }}
+        </enrollment>
+        <auto_restart>yes</auto_restart>
+        <crypto_method>aes</crypto_method>
+        <notify_time>30</notify_time>
+        <time-reconnect>60</time-reconnect>
+      </client>
+
+      <!-- ============================================================ -->
+      <!-- Security Configuration Assessment (SCA) — Multi-Framework    -->
+      <!-- ============================================================ -->
+      {{- if .Values.sca.enabled }}
+      <sca>
+        <enabled>yes</enabled>
+        <scan_on_start>{{ .Values.sca.scanOnStart | ternary "yes" "no" }}</scan_on_start>
+        <interval>{{ .Values.sca.interval }}s</interval>
+        <skip_nfs>{{ .Values.sca.skipNfs | ternary "yes" "no" }}</skip_nfs>
+        <policies>
+{{ include "wazuh-k8s-hardening.scaPolicies" . }}
+        </policies>
+      </sca>
+      {{- end }}
+
+      <!-- ============================================================ -->
+      <!-- Vulnerability Detection                                       -->
+      <!-- ============================================================ -->
+      {{- if .Values.vulnerabilityDetector.enabled }}
+      <vulnerability-detector>
+        <enabled>yes</enabled>
+        <interval>{{ .Values.vulnerabilityDetector.interval }}s</interval>
+        <run_on_start>yes</run_on_start>
+        {{- if .Values.vulnerabilityDetector.providers.canonical.enabled }}
+        <provider name="canonical">
+          <enabled>yes</enabled>
+          <os>focal</os>
+          <os>jammy</os>
+          <os>noble</os>
+          <update_interval>1h</update_interval>
+        </provider>
+        {{- end }}
+        {{- if .Values.vulnerabilityDetector.providers.redhat.enabled }}
+        <provider name="redhat">
+          <enabled>yes</enabled>
+          <os>8</os>
+          <os>9</os>
+          <update_interval>1h</update_interval>
+        </provider>
+        {{- end }}
+        {{- if .Values.vulnerabilityDetector.providers.nvd.enabled }}
+        <provider name="nvd">
+          <enabled>yes</enabled>
+          <update_interval>1h</update_interval>
+        </provider>
+        {{- end }}
+        {{- if .Values.vulnerabilityDetector.providers.msu.enabled }}
+        <provider name="msu">
+          <enabled>yes</enabled>
+          <update_interval>1h</update_interval>
+        </provider>
+        {{- end }}
+      </vulnerability-detector>
+      {{- end }}
+
+      <!-- ============================================================ -->
+      <!-- File Integrity Monitoring (FIM) with Who-Data                 -->
+      <!-- ============================================================ -->
+      {{- if .Values.fim.enabled }}
+      <syscheck>
+        <disabled>no</disabled>
+        <frequency>{{ .Values.fim.frequency }}</frequency>
+        <scan_on_start>{{ .Values.fim.scanOnStart | ternary "yes" "no" }}</scan_on_start>
+        {{- range .Values.fim.directories }}
+        <directories realtime="{{ .realtime | ternary "yes" "no" }}" check_all="{{ .checkAll | ternary "yes" "no" }}"{{ if .reportChanges }} report_changes="yes"{{ end }}{{ if $.Values.fim.whoData }} whodata="yes"{{ end }}>{{ .path }}</directories>
+        {{- end }}
+        {{- range .Values.fim.ignorePaths }}
+        <ignore>{{ . }}</ignore>
+        {{- end }}
+        <allow_remote_commands>no</allow_remote_commands>
+        <!-- Registry monitoring for Windows nodes (if applicable) -->
+        <skip_nfs>yes</skip_nfs>
+        <skip_dev>yes</skip_dev>
+        <skip_proc>yes</skip_proc>
+        <skip_sys>yes</skip_sys>
+        <process_priority>10</process_priority>
+        <max_eps>100</max_eps>
+        <synchronization>
+          <enabled>yes</enabled>
+          <interval>5m</interval>
+          <max_eps>10</max_eps>
+        </synchronization>
+      </syscheck>
+      {{- end }}
+
+      <!-- ============================================================ -->
+      <!-- Log Collection                                                -->
+      <!-- ============================================================ -->
+      {{- if .Values.logCollector.enabled }}
+      {{- range .Values.logCollector.files }}
+      <localfile>
+        <log_format>{{ .logFormat }}</log_format>
+        <location>{{ .location }}</location>
+      </localfile>
+      {{- end }}
+      {{- if .Values.logCollector.containerRuntime.enabled }}
+      <localfile>
+        <log_format>{{ .Values.logCollector.containerRuntime.logFormat }}</log_format>
+        <location>{{ .Values.logCollector.containerRuntime.logPath }}</location>
+      </localfile>
+      {{- end }}
+      {{- end }}
+
+      <!-- Kubernetes audit logs -->
+      {{- if .Values.kubernetesAudit.enabled }}
+      <localfile>
+        <log_format>json</log_format>
+        <location>{{ .Values.kubernetesAudit.auditLogPath }}</location>
+      </localfile>
+      {{- end }}
+
+      <!-- ============================================================ -->
+      <!-- Rootcheck — Rootkit and Anomaly Detection                     -->
+      <!-- ============================================================ -->
+      <rootcheck>
+        <disabled>no</disabled>
+        <check_files>yes</check_files>
+        <check_trojans>yes</check_trojans>
+        <check_dev>yes</check_dev>
+        <check_sys>yes</check_sys>
+        <check_pids>yes</check_pids>
+        <check_ports>yes</check_ports>
+        <check_if>yes</check_if>
+        <frequency>43200</frequency>
+        <rootkit_files>/var/ossec/etc/rootcheck/rootkit_files.txt</rootkit_files>
+        <rootkit_trojans>/var/ossec/etc/rootcheck/rootkit_trojans.txt</rootkit_trojans>
+      </rootcheck>
+
+      <!-- ============================================================ -->
+      <!-- Active Response                                               -->
+      <!-- ============================================================ -->
+      <active-response>
+        <disabled>{{ .Values.alertRouting.activeResponse.enabled | ternary "no" "yes" }}</disabled>
+        {{- if and .Values.alertRouting.activeResponse.enabled .Values.alertRouting.activeResponse.firewallDrop.enabled }}
+        <command>firewall-drop</command>
+        <location>local</location>
+        <timeout>{{ .Values.alertRouting.activeResponse.firewallDrop.timeout }}</timeout>
+        {{- range .Values.alertRouting.activeResponse.firewallDrop.ruleIds }}
+        <rules_id>{{ . }}</rules_id>
+        {{- end }}
+        {{- end }}
+      </active-response>
+
+      <!-- ============================================================ -->
+      <!-- Alert Integrations                                            -->
+      <!-- ============================================================ -->
+      {{- if .Values.alertRouting.integrations.slack.enabled }}
+      <integration>
+        <name>slack</name>
+        <hook_url>{{ .Values.alertRouting.integrations.slack.webhookUrl }}</hook_url>
+        <level>{{ .Values.alertRouting.integrations.slack.minLevel }}</level>
+        <alert_format>json</alert_format>
+      </integration>
+      {{- end }}
+
+      {{- if .Values.alertRouting.integrations.pagerduty.enabled }}
+      <integration>
+        <name>pagerduty</name>
+        <api_key>{{ .Values.alertRouting.integrations.pagerduty.apiKey }}</api_key>
+        <level>{{ .Values.alertRouting.integrations.pagerduty.minLevel }}</level>
+        <alert_format>json</alert_format>
+      </integration>
+      {{- end }}
+
+      <!-- ============================================================ -->
+      <!-- Agent Tuning                                                  -->
+      <!-- ============================================================ -->
+      <logging>
+        <log_format>json</log_format>
+      </logging>
+
+      <client_buffer>
+        <disabled>no</disabled>
+        <queue_size>5000</queue_size>
+        <events_per_second>500</events_per_second>
+      </client_buffer>
+
+    </ossec_config>

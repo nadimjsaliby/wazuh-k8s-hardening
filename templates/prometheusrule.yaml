@@ -1,0 +1,81 @@
+{{- if and .Values.metrics.enabled .Values.metrics.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+    app.kubernetes.io/component: metrics
+    {{- with .Values.metrics.prometheusRule.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: wazuh-k8s-hardening.rules
+      rules:
+        - alert: WazuhAgentDown
+          expr: wazuh_agent_up == 0
+          for: 5m
+          labels:
+            severity: critical
+            component: wazuh-agent
+          annotations:
+            summary: "Wazuh agent is down on node {{ "{{" }} $labels.node {{ "}}" }}"
+            description: "Wazuh agent on node {{ "{{" }} $labels.node {{ "}}" }} in cluster {{ "{{" }} $labels.cluster {{ "}}" }} has been down for more than 5 minutes."
+            runbook_url: "https://documentation.wazuh.com/current/user-manual/agent/agent-management.html"
+
+        - alert: WazuhHighSCAFailureRate
+          expr: (wazuh_sca_checks_failed / (wazuh_sca_checks_passed + wazuh_sca_checks_failed)) > 0.3
+          for: 15m
+          labels:
+            severity: warning
+            component: sca
+          annotations:
+            summary: "High SCA failure rate on node {{ "{{" }} $labels.node {{ "}}" }}"
+            description: "More than 30% of SCA checks are failing on node {{ "{{" }} $labels.node {{ "}}" }}. Current failure rate: {{ "{{" }} $value | humanizePercentage {{ "}}" }}."
+
+        - alert: WazuhCriticalSCAFailures
+          expr: (wazuh_sca_checks_failed / (wazuh_sca_checks_passed + wazuh_sca_checks_failed)) > 0.5
+          for: 5m
+          labels:
+            severity: critical
+            component: sca
+          annotations:
+            summary: "Critical SCA failure rate on node {{ "{{" }} $labels.node {{ "}}" }}"
+            description: "More than 50% of SCA checks are failing. Immediate remediation required."
+
+        - alert: WazuhVulnerabilitiesDetected
+          expr: wazuh_vulnerabilities_detected > 50
+          for: 30m
+          labels:
+            severity: warning
+            component: vulnerability-detector
+          annotations:
+            summary: "High vulnerability count on node {{ "{{" }} $labels.node {{ "}}" }}"
+            description: "{{ "{{" }} $value {{ "}}" }} vulnerabilities detected on node {{ "{{" }} $labels.node {{ "}}" }}."
+
+        - alert: WazuhFIMSpikeDetected
+          expr: rate(wazuh_fim_events_total[5m]) > 10
+          for: 10m
+          labels:
+            severity: warning
+            component: fim
+          annotations:
+            summary: "FIM event spike on node {{ "{{" }} $labels.node {{ "}}" }}"
+            description: "Unusual rate of file integrity changes detected. Possible unauthorized modification."
+
+        - alert: WazuhAlertStorm
+          expr: rate(wazuh_alerts_total[5m]) > 50
+          for: 5m
+          labels:
+            severity: critical
+            component: alerts
+          annotations:
+            summary: "Alert storm detected on node {{ "{{" }} $labels.node {{ "}}" }}"
+            description: "Generating alerts at {{ "{{" }} $value {{ "}}" }}/sec. Possible active incident."
+
+        {{- with .Values.metrics.prometheusRule.rules }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}

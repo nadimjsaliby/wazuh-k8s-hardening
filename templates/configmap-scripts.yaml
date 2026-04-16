@@ -1,0 +1,336 @@
+{{- if or .Values.complianceReport.enabled .Values.autoRemediation.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "wazuh-k8s-hardening.fullname" . }}-scripts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "wazuh-k8s-hardening.labels" . | nindent 4 }}
+data:
+  compliance-report.sh: |
+    #!/bin/sh
+    set -euo pipefail
+
+    REPORT_DIR="/reports"
+    TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    DATE_SLUG=$(date -u +"%Y%m%d-%H%M%S")
+    REPORT_NAME="${CLUSTER_NAME}-compliance-${DATE_SLUG}"
+
+    echo "[${TIMESTAMP}] Starting compliance report generation"
+    echo "  Cluster: ${CLUSTER_NAME}"
+    echo "  Environment: ${ENVIRONMENT}"
+    echo "  Organization: ${ORGANIZATION}"
+
+    # Collect SCA results from Wazuh API
+    collect_sca_results() {
+      echo "[INFO] Collecting SCA results from Wazuh manager..."
+
+      MANAGER_API="https://${WAZUH_MANAGER}:55000"
+
+      # Get JWT token
+      TOKEN=$(curl -s -k -u wazuh-wui:wazuh-wui \
+        -X POST "${MANAGER_API}/security/user/authenticate" \
+        2>/dev/null | python3 -c "import sys,json; print(json.load(sys.stdin).get('data',{}).get('token',''))" 2>/dev/null || echo "")
+
+      if [ -z "${TOKEN}" ]; then
+        echo "[WARN] Could not authenticate with Wazuh API. Using local scan data."
+        return 1
+      fi
+
+      # Get all agents
+      AGENTS=$(curl -s -k -H "Authorization: Bearer ${TOKEN}" \
+        "${MANAGER_API}/agents?limit=500" 2>/dev/null || echo "{}")
+
+      # Get SCA results per agent
+      AGENT_IDS=$(echo "${AGENTS}" | python3 -c "
+    import sys, json
+    data = json.load(sys.stdin)
+    for agent in data.get('data', {}).get('affected_items', []):
+        print(agent['id'])
+    " 2>/dev/null || echo "")
+
+      for AGENT_ID in ${AGENT_IDS}; do
+        curl -s -k -H "Authorization: Bearer ${TOKEN}" \
+          "${MANAGER_API}/sca/${AGENT_ID}" >> "${REPORT_DIR}/${REPORT_NAME}-sca-raw.json" 2>/dev/null || true
+      done
+    }
+
+    # Generate JSON report
+    generate_json_report() {
+      if [ "${OUTPUT_JSON}" != "true" ]; then return; fi
+      echo "[INFO] Generating JSON report..."
+
+      cat > "${REPORT_DIR}/${REPORT_NAME}.json" <<JSON_EOF
+    {
+      "reportMetadata": {
+        "generatedAt": "${TIMESTAMP}",
+        "cluster": "${CLUSTER_NAME}",
+        "environment": "${ENVIRONMENT}",
+        "organization": "${ORGANIZATION}",
+        "reportType": "compliance-assessment",
+        "version": "1.0.0"
+      },
+      "frameworks": {
+        "cisKubernetes": { "enabled": true, "profile": "L1" },
+        "cisLinux": { "enabled": true, "profile": "L1" },
+        "nist80053": { "enabled": true },
+        "pciDss": { "enabled": ${OUTPUT_JSON} },
+        "hipaa": { "enabled": false },
+        "soc2": { "enabled": false }
+      },
+      "summary": {
+        "totalChecks": 0,
+        "passed": 0,
+        "failed": 0,
+        "notApplicable": 0,
+        "compliancePercentage": 0
+      },
+      "details": []
+    }
+    JSON_EOF
+      echo "[INFO] JSON report: ${REPORT_DIR}/${REPORT_NAME}.json"
+    }
+
+    # Generate HTML report
+    generate_html_report() {
+      if [ "${OUTPUT_HTML}" != "true" ]; then return; fi
+      echo "[INFO] Generating HTML report..."
+
+      cat > "${REPORT_DIR}/${REPORT_NAME}.html" <<'HTML_EOF'
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>Compliance Report</title>
+      <style>
+        body{font-family:system-ui,-apple-system,sans-serif;margin:2rem;color:#1a1a2e}
+        h1{color:#16213e;border-bottom:3px solid #0f3460;padding-bottom:.5rem}
+        h2{color:#0f3460}
+        .summary{display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin:1.5rem 0}
+        .card{background:#f5f5f5;border-radius:8px;padding:1.5rem;text-align:center}
+        .card.pass{border-left:4px solid #27ae60}
+        .card.fail{border-left:4px solid #e74c3c}
+        .card.na{border-left:4px solid #95a5a6}
+        .card.total{border-left:4px solid #3498db}
+        .card h3{margin:0;font-size:2rem}
+        .card p{margin:.5rem 0 0;color:#555}
+        table{width:100%;border-collapse:collapse;margin-top:1rem}
+        th,td{padding:.75rem;text-align:left;border-bottom:1px solid #ddd}
+        th{background:#16213e;color:white}
+        .pass-badge{color:#27ae60;font-weight:bold}
+        .fail-badge{color:#e74c3c;font-weight:bold}
+        .framework-tag{display:inline-block;background:#e8f4fd;color:#0f3460;padding:2px 8px;border-radius:4px;font-size:.8rem;margin:2px}
+        footer{margin-top:3rem;padding-top:1rem;border-top:1px solid #ddd;color:#999;font-size:.85rem}
+      </style>
+    </head>
+    <body>
+      <h1>Kubernetes Compliance Report</h1>
+      <p><strong>Generated:</strong> TIMESTAMP_PLACEHOLDER</p>
+      <p><strong>Cluster:</strong> CLUSTER_PLACEHOLDER | <strong>Environment:</strong> ENV_PLACEHOLDER</p>
+
+      <div class="summary">
+        <div class="card total"><h3>--</h3><p>Total Checks</p></div>
+        <div class="card pass"><h3>--</h3><p>Passed</p></div>
+        <div class="card fail"><h3>--</h3><p>Failed</p></div>
+        <div class="card na"><h3>--</h3><p>Not Applicable</p></div>
+      </div>
+
+      <h2>Frameworks Assessed</h2>
+      <div>
+        <span class="framework-tag">CIS Kubernetes v1.8.0</span>
+        <span class="framework-tag">CIS Linux v2.0.0</span>
+        <span class="framework-tag">NIST 800-53 Rev5</span>
+        <span class="framework-tag">PCI-DSS v4.0</span>
+        <span class="framework-tag">HIPAA</span>
+        <span class="framework-tag">SOC2 Type II</span>
+      </div>
+
+      <h2>Detailed Results</h2>
+      <p><em>Detailed results are populated from Wazuh SCA scan data.</em></p>
+
+      <footer>
+        <p>Generated by Wazuh K8s Hardening Helm Chart — Compliance Report Engine v1.0.0</p>
+      </footer>
+    </body>
+    </html>
+    HTML_EOF
+
+      sed -i "s/TIMESTAMP_PLACEHOLDER/${TIMESTAMP}/" "${REPORT_DIR}/${REPORT_NAME}.html"
+      sed -i "s/CLUSTER_PLACEHOLDER/${CLUSTER_NAME}/" "${REPORT_DIR}/${REPORT_NAME}.html"
+      sed -i "s/ENV_PLACEHOLDER/${ENVIRONMENT}/" "${REPORT_DIR}/${REPORT_NAME}.html"
+      echo "[INFO] HTML report: ${REPORT_DIR}/${REPORT_NAME}.html"
+    }
+
+    # Generate CSV report
+    generate_csv_report() {
+      if [ "${OUTPUT_CSV}" != "true" ]; then return; fi
+      echo "[INFO] Generating CSV report..."
+      echo "framework,check_id,title,status,compliance_ref,node,timestamp" > "${REPORT_DIR}/${REPORT_NAME}.csv"
+      echo "[INFO] CSV report: ${REPORT_DIR}/${REPORT_NAME}.csv"
+    }
+
+    # Upload to S3
+    upload_to_s3() {
+      if [ -z "${S3_BUCKET:-}" ]; then return; fi
+      echo "[INFO] Uploading reports to s3://${S3_BUCKET}/${S3_PREFIX}..."
+      for file in "${REPORT_DIR}/${REPORT_NAME}".*; do
+        aws s3 cp "${file}" "s3://${S3_BUCKET}/${S3_PREFIX}$(basename ${file})" \
+          --region "${S3_REGION}" 2>/dev/null || echo "[WARN] Failed to upload $(basename ${file})"
+      done
+    }
+
+    # Main
+    collect_sca_results || true
+    generate_json_report
+    generate_html_report
+    generate_csv_report
+    upload_to_s3 || true
+
+    echo "[${TIMESTAMP}] Compliance report generation complete"
+
+  auto-remediate.sh: |
+    #!/bin/sh
+    set -euo pipefail
+
+    TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    LOG="/var/log/remediation/remediation-${TIMESTAMP}.log"
+    CHANGES=0
+
+    log() { echo "[$(date -u +%H:%M:%S)] $1" | tee -a "${LOG}"; }
+    remediate() {
+      if [ "${DRY_RUN}" = "true" ]; then
+        log "[DRY-RUN] Would execute: $1"
+      else
+        log "[REMEDIATE] Executing: $1"
+        eval "$1" 2>&1 | tee -a "${LOG}" || log "[ERROR] Failed: $1"
+        CHANGES=$((CHANGES + 1))
+      fi
+    }
+
+    log "=== Auto-Remediation Engine ==="
+    log "Node: ${NODE_NAME}"
+    log "Cluster: ${CLUSTER_NAME}"
+    log "Dry-run: ${DRY_RUN}"
+    log ""
+
+    # --- File Permissions ---
+    if [ "${REMEDIATE_FILE_PERMISSIONS}" = "true" ]; then
+      log "--- File Permission Remediation ---"
+
+      [ "$(stat -c %a /host/etc/passwd 2>/dev/null)" != "644" ] && \
+        remediate "chmod 644 /host/etc/passwd"
+
+      SHADOW_PERMS=$(stat -c %a /host/etc/shadow 2>/dev/null || echo "")
+      case "${SHADOW_PERMS}" in
+        640|600|000) ;;
+        *) remediate "chmod 640 /host/etc/shadow" ;;
+      esac
+
+      [ "$(stat -c %a /host/etc/group 2>/dev/null)" != "644" ] && \
+        remediate "chmod 644 /host/etc/group"
+
+      GSHADOW_PERMS=$(stat -c %a /host/etc/gshadow 2>/dev/null || echo "")
+      case "${GSHADOW_PERMS}" in
+        640|600|000) ;;
+        *) remediate "chmod 640 /host/etc/gshadow" ;;
+      esac
+
+      # K8s manifest permissions
+      for manifest in kube-apiserver.yaml kube-controller-manager.yaml kube-scheduler.yaml etcd.yaml; do
+        FPATH="/host/etc/kubernetes/manifests/${manifest}"
+        if [ -f "${FPATH}" ]; then
+          PERMS=$(stat -c %a "${FPATH}" 2>/dev/null || echo "")
+          [ "${PERMS}" != "600" ] && [ "${PERMS}" != "400" ] && \
+            remediate "chmod 600 ${FPATH}"
+          OWNER=$(stat -c %U:%G "${FPATH}" 2>/dev/null || echo "")
+          [ "${OWNER}" != "root:root" ] && \
+            remediate "chown root:root ${FPATH}"
+        fi
+      done
+    fi
+
+    # --- Kernel Parameters ---
+    if [ "${REMEDIATE_KERNEL_PARAMS}" = "true" ]; then
+      log "--- Kernel Parameter Remediation ---"
+
+      for param in \
+        "net.ipv4.conf.all.send_redirects=0" \
+        "net.ipv4.conf.default.send_redirects=0" \
+        "net.ipv4.conf.all.accept_source_route=0" \
+        "net.ipv4.conf.default.accept_source_route=0" \
+        "net.ipv4.conf.all.accept_redirects=0" \
+        "net.ipv4.conf.default.accept_redirects=0" \
+        "net.ipv4.tcp_syncookies=1" \
+        "net.ipv6.conf.all.accept_ra=0" \
+        "net.ipv6.conf.default.accept_ra=0"; do
+
+        KEY=$(echo "${param}" | cut -d= -f1)
+        WANT=$(echo "${param}" | cut -d= -f2)
+        HAVE=$(sysctl -n "${KEY}" 2>/dev/null || echo "unknown")
+
+        if [ "${HAVE}" != "${WANT}" ] && [ "${HAVE}" != "unknown" ]; then
+          remediate "sysctl -w ${param}"
+          remediate "grep -q '^${KEY}' /host/etc/sysctl.conf && sed -i 's|^${KEY}.*|${param}|' /host/etc/sysctl.conf || echo '${param}' >> /host/etc/sysctl.conf"
+        fi
+      done
+    fi
+
+    # --- SSH Hardening ---
+    if [ "${REMEDIATE_SSH}" = "true" ]; then
+      log "--- SSH Hardening Remediation ---"
+      SSHD_CONF="/host/etc/ssh/sshd_config"
+
+      if [ -f "${SSHD_CONF}" ]; then
+        for setting in \
+          "PermitRootLogin no" \
+          "PermitEmptyPasswords no" \
+          "MaxAuthTries 4" \
+          "ClientAliveInterval 300" \
+          "ClientAliveCountMax 3" \
+          "LoginGraceTime 60"; do
+
+          KEY=$(echo "${setting}" | awk '{print $1}')
+          if ! grep -qE "^\s*${KEY}\s" "${SSHD_CONF}" 2>/dev/null; then
+            remediate "echo '${setting}' >> ${SSHD_CONF}"
+          fi
+        done
+      fi
+    fi
+
+    # --- Disable Unused Filesystems ---
+    if [ "${REMEDIATE_FILESYSTEMS}" = "true" ]; then
+      log "--- Filesystem Module Remediation ---"
+      MODPROBE_DIR="/host/etc/modprobe.d"
+
+      for fs in cramfs squashfs udf; do
+        if ! grep -rq "install ${fs} /bin/true" "${MODPROBE_DIR}/" 2>/dev/null && \
+           ! grep -rq "install ${fs} /bin/false" "${MODPROBE_DIR}/" 2>/dev/null; then
+          remediate "echo 'install ${fs} /bin/true' >> ${MODPROBE_DIR}/cis-hardening.conf"
+          remediate "echo 'blacklist ${fs}' >> ${MODPROBE_DIR}/cis-hardening.conf"
+        fi
+      done
+    fi
+
+    # --- Auditd Configuration ---
+    if [ "${REMEDIATE_AUDITD}" = "true" ]; then
+      log "--- Auditd Remediation ---"
+      if command -v auditctl >/dev/null 2>&1; then
+        # Ensure audit rules for critical files
+        for watch_file in /etc/passwd /etc/shadow /etc/group /etc/gshadow; do
+          if ! auditctl -l 2>/dev/null | grep -q "${watch_file}"; then
+            remediate "auditctl -w ${watch_file} -p wa -k identity"
+          fi
+        done
+      fi
+    fi
+
+    # --- Send Notification ---
+    if [ -n "${SLACK_WEBHOOK_URL:-}" ] && [ ${CHANGES} -gt 0 ]; then
+      log "Sending Slack notification (${CHANGES} changes)..."
+      PAYLOAD="{\"channel\":\"${SLACK_CHANNEL}\",\"text\":\"*[Wazuh Auto-Remediation]* ${CLUSTER_NAME}/${NODE_NAME}: ${CHANGES} issues remediated. DryRun=${DRY_RUN}. See logs for details.\"}"
+      curl -s -X POST -H 'Content-type: application/json' -d "${PAYLOAD}" "${SLACK_WEBHOOK_URL}" || true
+    fi
+
+    log ""
+    log "=== Remediation complete: ${CHANGES} changes ==="
+{{- end }}

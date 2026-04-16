@@ -1,0 +1,8 @@
+remote: https://github.com/nadimjsaliby/wazuh-k8s-hardening
+target-branch: main
+chart-dirs:
+  - .
+chart-repos: []
+helm-extra-args: --timeout 600s
+validate-maintainers: false
+check-version-increment: true
